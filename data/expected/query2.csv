@@ -1,15 +1,15 @@
-name,url,image
-Satake Yoshinobu,https://fr.wikipedia.org/wiki/Satake_Yoshinobu,https://upload.wikimedia.org/wikipedia/commons/3/3b/Satake_Yoshinobu.jpg
-Ramez Dayoub,https://fr.wikipedia.org/wiki/Ramez_Dayoub,https://upload.wikimedia.org/wikipedia/commons/1/14/MALAYSIA_CUP_2012_SEMI_FINAL_%288414249718%29.jpg
-Taras Khtey,https://fr.wikipedia.org/wiki/Taras_Khtey,https://upload.wikimedia.org/wikipedia/commons/b/b5/Taras_Khtey_Russian_2012_olympians.jpg
-Kim Mi-hyun,https://fr.wikipedia.org/wiki/Kim_Mi-hyun,https://upload.wikimedia.org/wikipedia/commons/1/14/2009_LPGA_Championship_-_Mi_Hyun_Kim_%281%29.jpg
-Jill Thompson,https://fr.wikipedia.org/wiki/Jill_Thompson,https://upload.wikimedia.org/wikipedia/commons/c/cb/10.15.11JillThompsonByLuigiNovi1.jpg
-Giorgio Brambilla,https://fr.wikipedia.org/wiki/Giorgio_Brambilla,https://upload.wikimedia.org/wikipedia/commons/8/85/Giorgio_Brambilla_4JDD2011.JPG
-Kevin Jorgeson,https://fr.wikipedia.org/wiki/Kevin_Jorgeson,https://upload.wikimedia.org/wikipedia/commons/3/3f/TSM350_-_Kevin_Jorgeson_-_2015_-_Stierch.jpg
-Antoni Łyko,https://fr.wikipedia.org/wiki/Antoni_%C5%81yko,https://upload.wikimedia.org/wikipedia/commons/3/3c/Antoni_%C5%81yko.jpg
-Amélie Rivat,https://fr.wikipedia.org/wiki/Am%C3%A9lie_Rivat,https://upload.wikimedia.org/wikipedia/commons/8/8a/Amelie_Rivat%2C_Giro_Rosa_2016.jpg
-Cathy Ubels-Veen,https://fr.wikipedia.org/wiki/Cathy_Ubels-Veen,https://upload.wikimedia.org/wikipedia/commons/a/ac/Cathy_Ubels_%28EVP%29%2C_Bestanddeelnr_932-3182.jpg
-Alexandre Fiodorovitch Plechtcheïev,https://fr.wikipedia.org/wiki/Alexandre_Fiodorovitch_Plechtche%C3%AFev,https://upload.wikimedia.org/wikipedia/commons/2/2c/Pleshcheev_v1_p44.png
-Attilio Perez,https://fr.wikipedia.org/wiki/Attilio_Perez,https://upload.wikimedia.org/wikipedia/commons/e/ec/Firma_Attilio_Perez.jpg
-Arno van Zwam,https://fr.wikipedia.org/wiki/Arno_van_Zwam,https://upload.wikimedia.org/wikipedia/commons/1/13/Arno_van_Zwam_%282015%29.jpg
-Amleto Cataldi,https://fr.wikipedia.org/wiki/Amleto_Cataldi,https://upload.wikimedia.org/wikipedia/commons/4/46/Leonardo_IMG_1759.JPG
+name,url,image_sha256
+Satake Yoshinobu,https://fr.wikipedia.org/wiki/Satake_Yoshinobu,eff09da15ba7fa5d2d266d862f0288f761b256a3fdf7d469b0bc08d92772316b
+Ramez Dayoub,https://fr.wikipedia.org/wiki/Ramez_Dayoub,4168dedbe335493f1df03d295c88b64c757a900ff26d380aec98580a243e5d89
+Taras Khtey,https://fr.wikipedia.org/wiki/Taras_Khtey,c327482c81e3f0036235c869365e04c37c7ff92a6edc5047d8cfcbd9cd1fe6ba
+Kim Mi-hyun,https://fr.wikipedia.org/wiki/Kim_Mi-hyun,fc596f97f51779788bf6e28327f63cc6f62bc3df18223fcbe327eb12ec1dcfc4
+Jill Thompson,https://fr.wikipedia.org/wiki/Jill_Thompson,b8274e5fc20c6a216152011bc87af78e7882b369d5a7f784447db56876893c6a
+Giorgio Brambilla,https://fr.wikipedia.org/wiki/Giorgio_Brambilla,570f9e162e5722e39bd2f8ac780fe6f1a14deab94057b69f6cd8d391959fd168
+Kevin Jorgeson,https://fr.wikipedia.org/wiki/Kevin_Jorgeson,8d5d84d2e1fea261a054162f8e12324bddf6391a4446da2ccdc62da89519492d
+Antoni Łyko,https://fr.wikipedia.org/wiki/Antoni_%C5%81yko,f7f575854f9f22bd1a79a401dbc1e54ba83cc73b57b009cb7c546defb514fdac
+Amélie Rivat,https://fr.wikipedia.org/wiki/Am%C3%A9lie_Rivat,f0d0757c26cbfa8ff8e3fc988aa67b34f8cb6ee758d31154468c56510c45a54e
+Cathy Ubels-Veen,https://fr.wikipedia.org/wiki/Cathy_Ubels-Veen,6d9a7849ad1f8dd170a66377c4981d9633448587bf3c6662475986a4e46b3a55
+Alexandre Fiodorovitch Plechtcheïev,https://fr.wikipedia.org/wiki/Alexandre_Fiodorovitch_Plechtche%C3%AFev,a7a18600791c22152bbf152e27ff3de583cff79a214045dee8c0538cb9c59b65
+Attilio Perez,https://fr.wikipedia.org/wiki/Attilio_Perez,bca046ac0589fbb9d238d0c1a38391678f055cae5bd41b6f7f43ac55fea62654
+Arno van Zwam,https://fr.wikipedia.org/wiki/Arno_van_Zwam,5bc20c2fc5e5057f4f19ba2b9d462fd002c31172609612ebbefef5a3125b5a62
+Amleto Cataldi,https://fr.wikipedia.org/wiki/Amleto_Cataldi,5474d8ad1aaafb778bbc1644654e015e7859d8aba588f8a7feea8d9c409e4641
