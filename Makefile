@@ -1,7 +1,8 @@
 VENV := .venv
 PIP := $(VENV)/bin/pip
 PYTEST := $(VENV)/bin/pytest
-UNIT_TEST_FILE = tests/test_querys.py
+QUERY_TEST_FILE = tests/test_querys.py
+MIDDLEWARE_TEST_FILE = tests/test_middleware.py
 
 .PHONY: setup rabbit-up rabbit-down test-unit test-integration
 
@@ -35,6 +36,15 @@ test-query5:
 
 rabbit-up:
 	docker start rabbit 2>/dev/null || docker run -d --name rabbit -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+	@echo "Esperando a RabbitMQ..."
+	@for i in $$(seq 1 40); do \
+		$(VENV)/bin/python -c "import pika; pika.BlockingConnection(pika.ConnectionParameters('localhost')).close()" >/dev/null 2>&1 \
+			&& echo "RabbitMQ listo" && exit 0; \
+		sleep 2; \
+	done; echo "RabbitMQ no respondió a tiempo: mirá docker logs rabbit"; exit 1
 
 rabbit-down:
 	docker rm -f rabbit
+
+rabbit-test: rabbit-up
+	$(PYTEST) $(MIDDLEWARE_TEST_FILE) -v
