@@ -1,40 +1,50 @@
-"""
-Mensajes del sistema (CONTRATO PROVISORIO del Gateway/Client).
 
-Este módulo contiene solo lo que necesitan el Client y el Gateway. El paquete
-common.protocol completo cuando  exista, estos nombres y formatos 
-deben mantenerse o actualizarse en un solo lugar.
+from . import external_serializer as serializer
 
-Todos los mensajes son diccionarios JSON. Los mensajes que viajan por RabbitMQ llevan el
-encabezado común H = {client_id, batch_id, origin} y client_id = [gw_id, n]:
-    gw_id  -> identifica al Gateway dueño del cliente (clave de ruteo de results_ex)
-    n      -> identifica la conexión del cliente dentro de ese Gateway
+# Mensajes externos: Client <-> Gateway
+BATCH = 1
+EOF = 2
+ABORT = 3
+RESULT = 4
+DONE = 5
+WELCOME = 6
+ERROR = 7
 
-Por RabbitMQ (Gateway -> year_in):
-    batch  {type, client_id, batch_id, origin, rows}
-    eof    {type, client_id, origin}
-Por RabbitMQ (Gateway -> abort_ex, fanout):
-    abort  {type, client_id}
-Por RabbitMQ (Joiner -> out_q.<g>):
-    result {type, client_id, query, rows}
-    done   {type, client_id}
+# Mensajes internos: etapas del pipeline
+ARTICLE = 20
+FILTERED_ARTICLE = 21
+TOKENS = 22
+WORD_COUNTS = 23
+PARTIAL_TOP = 24
+AVERAGE_DATA = 25
+AVERAGE_READY = 26
+Q5_ARTICLE = 27
 
-Por TCP (Client <-> Gateway) viajan los mismos tipos sin client_id (lo agrega el Gateway),
-más 'welcome' y 'error'.
-"""
-import json
+# EOF interno
+STAGE_EOF = 28
 
-#Tipos de mensaje
-BATCH = "batch"
-EOF = "eof"
-ABORT = "abort"
-RESULT = "result"
-DONE = "done"
-WELCOME = "welcome"
-ERROR = "error"
+TYPE_NAMES = {
+    BATCH: "batch",
+    EOF: "eof",
+    ABORT: "abort",
+    RESULT: "result",
+    DONE: "done",
+    WELCOME: "welcome",
+    ERROR: "error",
+    ARTICLE: "article",
+    FILTERED_ARTICLE: "filtered_article",
+    TOKENS: "tokens",
+    WORD_COUNTS: "word_counts",
+    PARTIAL_TOP: "partial_top",
+    AVERAGE_DATA: "average_data",
+    AVERAGE_READY: "average_ready",
+    Q5_ARTICLE: "q5_article",
+    STAGE_EOF: "stage_eof",
+}
 
-#Columnas de cada query en las filas de un 'result' (y en el CSV del cliente).
-#Q2 lleva la imagen en base64 en 'image'; el cliente la guarda y escribe su sha256.
+NAME_TYPES = {name: code for code, name in TYPE_NAMES.items()}
+
+# Columnas que escribe el cliente para cada consulta
 RESULT_COLUMNS = {
     1: ("date_modified", "url"),
     2: ("name", "url", "image"),
@@ -43,39 +53,281 @@ RESULT_COLUMNS = {
     5: ("url", "abstract_word_count"),
 }
 
-#Convierte el diccionario a bytes 
-def encode(message: dict) -> bytes:
-    return json.dumps(message, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+# Campos obligatorios por tipo
+REQUIRED_FIELDS = {
+    BATCH: ("batch_id", "rows"),
+    EOF: (),
+    ABORT: (),
+    RESULT: ("query", "rows"),
+    DONE: (),
+    WELCOME: ("client_id",),
+    ERROR: ("code", "message"),
+    ARTICLE: ("article",),
+    FILTERED_ARTICLE: ("query", "article"),
+    TOKENS: ("url", "language", "words", "period"),
+    WORD_COUNTS: ("counts",),
+    PARTIAL_TOP: ("counts",),
+    AVERAGE_DATA: ("sum", "count"),
+    AVERAGE_READY: ("average",),
+    Q5_ARTICLE: ("url", "word_count"),
+    STAGE_EOF: ("stage", "origin"),
+}
+
+# Campos adicionales que pueden aparecer en cada mensaje
+OPTIONAL_FIELDS = {
+    BATCH: ("client_id", "origin"),
+    EOF: ("client_id", "origin", "query", "stage"),
+    ABORT: ("client_id",),
+    RESULT: ("client_id", "origin"),
+    DONE: ("client_id",),
+    WELCOME: (),
+    ERROR: ("client_id",),
+    ARTICLE: ("client_id", "batch_id", "origin"),
+    FILTERED_ARTICLE: ("client_id", "batch_id", "origin"),
+    TOKENS: ("client_id", "batch_id", "origin"),
+    WORD_COUNTS: ("client_id", "origin"),
+    PARTIAL_TOP: ("client_id", "origin"),
+    AVERAGE_DATA: ("client_id", "batch_id", "origin"),
+    AVERAGE_READY: ("client_id",),
+    Q5_ARTICLE: ("client_id", "batch_id", "origin"),
+    STAGE_EOF: ("client_id",),
+}
 
 
-def decode(body: bytes) -> dict:
-    message = json.loads(body.decode("utf-8"))
-    if not isinstance(message, dict) or "type" not in message:
-        raise ValueError("mensaje sin 'type'")
+def client_id_of(message):
+    gw_id, number = message["client_id"]
+    return int(gw_id), int(number)
+
+
+def validate_message(message):
+    if not isinstance(message, dict):
+        raise ValueError("el mensaje debe ser un diccionario")
+
+    msg_type = message.get("type")
+    if isinstance(msg_type, str):
+        msg_type = NAME_TYPES.get(msg_type)
+    if not isinstance(msg_type, int) or isinstance(msg_type, bool):
+        raise ValueError("tipo de mensaje inválido")
+    if msg_type not in TYPE_NAMES:
+        raise ValueError(f"tipo de mensaje desconocido: {msg_type}")
+
+    if "type" not in message:
+        raise ValueError("mensaje sin tipo")
+
+    for field in REQUIRED_FIELDS[msg_type]:
+        if field not in message:
+            raise ValueError(f"falta el campo obligatorio '{field}'")
+
+    allowed = (
+        {"type"}
+        | set(REQUIRED_FIELDS[msg_type])
+        | set(OPTIONAL_FIELDS[msg_type])
+    )
+    extra = set(message) - allowed
+    if extra:
+        raise ValueError(f"campos no permitidos: {sorted(extra)}")
+
+    if "client_id" in message:
+        client_id = message["client_id"]
+        if (
+            not isinstance(client_id, (tuple, list))
+            or len(client_id) != 2
+            or any(
+                not isinstance(part, int) or isinstance(part, bool)
+                or part < 0
+                for part in client_id
+            )
+        ):
+            raise ValueError("client_id debe ser (gw_id, n)")
+
+    if msg_type == RESULT:
+        query = message["query"]
+        if query not in RESULT_COLUMNS:
+            raise ValueError("consulta inválida")
+        if not isinstance(message["rows"], list):
+            raise ValueError("rows debe ser una lista")
+
+    if msg_type == BATCH and not isinstance(message["rows"], list):
+        raise ValueError("rows debe ser una lista")
+
+    if msg_type == ERROR:
+        if not isinstance(message["code"], str):
+            raise ValueError("code debe ser un string")
+        if not isinstance(message["message"], str):
+            raise ValueError("message debe ser un string")
+
     return message
 
-#client_id como tupla (gw_id, n) para usar de clave
-def client_id_of(message: dict) -> tuple:
-    gw_id, n = message["client_id"]
-    return int(gw_id), int(n)
 
-#Arma el mensaje que el Gateway publica en la cola yeaer_in
-def batch_message(client_id, batch_id: int, origin: int, rows: list) -> dict:
-    return {"type": BATCH, "client_id": list(client_id), "batch_id": batch_id,
-            "origin": origin, "rows": rows}
+def encode(message):
+    validate_message(message)
 
-#Aviso de que el cliente no tiene mas datos
-def eof_message(client_id, origin: int) -> dict:
-    return {"type": EOF, "client_id": list(client_id), "origin": origin}
+    msg_type = message["type"]
+    if isinstance(msg_type, str):
+        msg_type = NAME_TYPES[msg_type]
 
-#Cliente se fue. Se libera su estado
-def abort_message(client_id) -> dict:
-    return {"type": ABORT, "client_id": list(client_id)}
+    payload = dict(message)
+    payload.pop("type")
+    return (
+        serializer.serialize_uint32(msg_type)
+        + serializer.serialize_value(payload)
+    )
 
-#Fragmento de resultado
-def result_message(client_id, query: int, rows: list) -> dict:
-    return {"type": RESULT, "client_id": list(client_id), "query": query, "rows": rows}
 
-#Se entregó todo
-def done_message(client_id) -> dict:
-    return {"type": DONE, "client_id": list(client_id)}
+def decode(data):
+    if len(data) < serializer.UINT32_SIZE:
+        raise ValueError("mensaje incompleto")
+
+    msg_type = serializer.deserialize_uint32(data[:4])
+    if msg_type not in TYPE_NAMES:
+        raise ValueError(f"tipo de mensaje desconocido: {msg_type}")
+
+    payload = serializer.deserialize_value(data[4:])
+    if not isinstance(payload, dict):
+        raise ValueError("el payload debe ser un diccionario")
+
+    message = {"type": TYPE_NAMES[msg_type], **payload}
+    validate_message(message)
+    return message
+
+
+def batch_message(client_id, batch_id, rows, origin=0):
+    return {
+        "type": "batch",
+        "client_id": tuple(client_id),
+        "batch_id": batch_id,
+        "origin": origin,
+        "rows": rows,
+    }
+
+
+def eof_message(client_id, origin=0):
+    return {
+        "type": "eof",
+        "client_id": tuple(client_id),
+        "origin": origin,
+    }
+
+
+def abort_message(client_id):
+    return {"type": "abort", "client_id": tuple(client_id)}
+
+
+def result_message(client_id, query, rows, origin=0):
+    return {
+        "type": "result",
+        "client_id": tuple(client_id),
+        "query": query,
+        "rows": rows,
+        "origin": origin,
+    }
+
+
+def done_message(client_id):
+    return {"type": "done", "client_id": tuple(client_id)}
+
+
+def welcome_message(client_id):
+    return {"type": "welcome", "client_id": tuple(client_id)}
+
+
+def error_message(code, message, client_id=None):
+    result = {"type": "error", "code": code, "message": message}
+    if client_id is not None:
+        result["client_id"] = tuple(client_id)
+    return result
+
+def article_message(article, client_id, batch_id, origin=0):
+    return {
+        "type": "article",
+        "client_id": tuple(client_id),
+        "batch_id": batch_id,
+        "origin": origin,
+        "article": article,
+    }
+
+
+def filtered_article_message(
+    query, article, client_id, batch_id, origin=0
+):
+    return {
+        "type": "filtered_article",
+        "query": query,
+        "article": article,
+        "client_id": tuple(client_id),
+        "batch_id": batch_id,
+        "origin": origin,
+    }
+
+
+def tokens_message(url, language, words, period, client_id, origin=0):
+    return {
+        "type": "tokens",
+        "url": url,
+        "language": language,
+        "words": words,
+        "period": period,
+        "client_id": tuple(client_id),
+        "origin": origin,
+    }
+
+
+def word_counts_message(counts, client_id, origin=0):
+    return {
+        "type": "word_counts",
+        "counts": counts,
+        "client_id": tuple(client_id),
+        "origin": origin,
+    }
+
+
+def partial_top_message(counts, client_id, origin=0):
+    return {
+        "type": "partial_top",
+        "counts": counts,
+        "client_id": tuple(client_id),
+        "origin": origin,
+    }
+
+
+def average_data_message(
+    client_id, batch_id, total, count, origin=0
+):
+    return {
+        "type": "average_data",
+        "client_id": tuple(client_id),
+        "batch_id": batch_id,
+        "sum": total,
+        "count": count,
+        "origin": origin,
+    }
+
+
+def average_ready_message(client_id, average):
+    return {
+        "type": "average_ready",
+        "client_id": tuple(client_id),
+        "average": average,
+    }
+
+
+def q5_article_message(
+    client_id, url, word_count, batch_id, origin=0
+):
+    return {
+        "type": "q5_article",
+        "client_id": tuple(client_id),
+        "url": url,
+        "word_count": word_count,
+        "batch_id": batch_id,
+        "origin": origin,
+    }
+
+
+def stage_eof_message(client_id, stage, origin):
+    return {
+        "type": "stage_eof",
+        "client_id": tuple(client_id),
+        "stage": stage,
+        "origin": origin,
+    }

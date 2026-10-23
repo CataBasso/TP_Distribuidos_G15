@@ -3,6 +3,7 @@ PIP := $(VENV)/bin/pip
 PYTEST := $(VENV)/bin/pytest
 QUERY_TEST_FILE = tests/test_querys.py
 MIDDLEWARE_TEST_FILE = tests/test_middleware.py
+PROTOCOL_TEST_FILE = tests/test_protocol.py
 
 .PHONY: setup rabbit-up rabbit-down test-unit test-integration
 
@@ -33,6 +34,9 @@ test-query4:
 
 test-query5:
 	$(PYTEST) $(UNIT_TEST_FILE)::test_query5 -v
+
+test-protocol:
+	$(PYTEST) $(PROTOCOL_TEST_FILE) -v
 
 rabbit-up:
 	docker start rabbit 2>/dev/null || docker run -d --name rabbit -p 5672:5672 -p 15672:15672 rabbitmq:3-management
