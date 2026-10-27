@@ -17,5 +17,17 @@ from .messages import (
     result_message,
     done_message,
     client_id_of,
+    TYPE_NAMES,
+    RESULT_COLUMNS,
+    BATCH,
+    EOF,
+    ABORT,
+    RESULT,
+    DONE,
+    WELCOME,
+    ERROR,
+    welcome_message,
+    error_message,
 )
 
+from . import external, internal
