@@ -19,7 +19,7 @@ STAGE = "year"
 
 class YearFilter:
     def __init__(self):
-        self.id = self.ID
+        self.id = ID
         self.rc = RabbitConnection(MOM_HOST)
         self.input_queue = MessageMiddlewareQueueRabbitMQ(MOM_HOST, INPUT_QUEUE, connection=self.rc)
         self.outputs = [
@@ -141,6 +141,6 @@ def main():
     year_filter.start()
     return 0
  
- 
+
 if __name__ == "__main__":
     main()
