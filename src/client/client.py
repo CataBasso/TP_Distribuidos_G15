@@ -12,7 +12,6 @@ from .results_writer import ResultWriter
 
 log = logging.getLogger("client")
 
-#recv_frame devuelve el tipo como nombre ("result"); las constantes del protocolo son códigos.
 _WELCOME, _RESULT, _DONE, _ERROR = (TYPE_NAMES[t] for t in (WELCOME, RESULT, DONE, ERROR))
 
 

@@ -1,4 +1,3 @@
-"""Tests del Client contra un Gateway falso (servidor TCP mínimo en un hilo)."""
 import socket
 import threading
 from pathlib import Path

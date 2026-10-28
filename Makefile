@@ -52,3 +52,24 @@ rabbit-down:
 
 rabbit-test: rabbit-up
 	$(PYTEST) $(MIDDLEWARE_TEST_FILE) -v
+
+CLIENT_GATEWAY_TESTS = tests/test_protocol.py tests/test_client_dataset.py \
+	tests/test_client_results_writer.py tests/test_client.py tests/test_gateway.py \
+	tests/test_client_gateway_e2e.py
+
+.PHONY: test-client-gateway test-gateway-rabbit run-gateway run-client
+
+test-client-gateway:
+	$(PYTEST) $(CLIENT_GATEWAY_TESTS) -v
+
+test-gateway-rabbit: rabbit-up
+	$(PYTEST) tests/test_gateway_rabbit.py -v
+
+run-gateway:
+	PYTHONPATH=src GATEWAY_ID=1 RABBIT_HOST=localhost $(VENV)/bin/python -m gateway
+
+run-client:
+	PYTHONPATH=src $(VENV)/bin/python -m client --data-dir data/sample/small_dataset --output-dir output
+
+run-fake-system:
+	PYTHONPATH=src $(VENV)/bin/python tools/fake_system.py --gw-id 1 --rabbit-host localhost
