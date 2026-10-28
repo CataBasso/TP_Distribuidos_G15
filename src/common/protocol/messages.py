@@ -20,8 +20,12 @@ AVERAGE_DATA = 25
 AVERAGE_READY = 26
 Q5_ARTICLE = 27
 
+
 # EOF interno
 STAGE_EOF = 28
+
+# Coordinacion entre replicas
+CONTROL: 29
 
 TYPE_NAMES = {
     BATCH: "batch",
@@ -40,6 +44,7 @@ TYPE_NAMES = {
     AVERAGE_READY: "average_ready",
     Q5_ARTICLE: "q5_article",
     STAGE_EOF: "stage_eof",
+    CONTROL: "control",
 }
 
 NAME_TYPES = {name: code for code, name in TYPE_NAMES.items()}
@@ -71,12 +76,13 @@ REQUIRED_FIELDS = {
     AVERAGE_READY: ("average",),
     Q5_ARTICLE: ("url", "word_count"),
     STAGE_EOF: ("stage", "origin"),
+    CONTROL: ("stage", "replica", "count"),
 }
 
 # Campos adicionales que pueden aparecer en cada mensaje
 OPTIONAL_FIELDS = {
     BATCH: ("client_id", "origin"),
-    EOF: ("client_id", "origin", "query", "stage"),
+    EOF: ("client_id", "origin", "query", "stage", "total"),
     ABORT: ("client_id",),
     RESULT: ("client_id", "origin"),
     DONE: ("client_id",),
@@ -90,7 +96,8 @@ OPTIONAL_FIELDS = {
     AVERAGE_DATA: ("client_id", "batch_id", "origin"),
     AVERAGE_READY: ("client_id",),
     Q5_ARTICLE: ("client_id", "batch_id", "origin"),
-    STAGE_EOF: ("client_id",),
+    STAGE_EOF: ("client_id", "total"),
+    CONTROL: ("client_id", "total"),
 }
 
 
@@ -150,6 +157,12 @@ def validate_message(message):
     if msg_type == BATCH and not isinstance(message["rows"], list):
         raise ValueError("rows debe ser una lista")
 
+    for field in ("total", "count"):
+        if field in message:
+            value = message[field]
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{field} debe ser un entero >= 0")
+            
     if msg_type == ERROR:
         if not isinstance(message["code"], str):
             raise ValueError("code debe ser un string")
@@ -201,13 +214,17 @@ def batch_message(client_id, batch_id, rows, origin=0):
     }
 
 
-def eof_message(client_id, origin=0):
-    return {
+def eof_message(client_id, origin=0, query=None, total=None):
+    message = {
         "type": "eof",
         "client_id": tuple(client_id),
         "origin": origin,
     }
-
+    if query is not None:
+        message["query"] = query
+    if total is not None:
+        message["total"] = total
+    return message
 
 def abort_message(client_id):
     return {"type": "abort", "client_id": tuple(client_id)}
@@ -324,10 +341,25 @@ def q5_article_message(
     }
 
 
-def stage_eof_message(client_id, stage, origin):
-    return {
+def stage_eof_message(client_id, stage, origin, total=None):
+    message = {
         "type": "stage_eof",
         "client_id": tuple(client_id),
         "stage": stage,
         "origin": origin,
     }
+    if total is not None:
+        message["total"] = total
+    return message
+
+def control_message(client_id, stage, replica, count, total=None):
+    message = {
+        "type": "control",
+        "client_id": tuple(client_id),
+        "stage": stage,
+        "replica": replica,
+        "count": count,
+    }
+    if total is not None:
+        message["total"] = total
+    return message
