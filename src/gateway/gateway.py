@@ -1,16 +1,16 @@
 import itertools
-import logging
+from logging import log
 import socket
 import threading
 
+from common.logger.logger import LogResult
+from common.logger import logger
 from common.protocol import (
     FrameError, recv_frame, decode, TYPE_NAMES, BATCH, EOF, RESULT, DONE,
     welcome_message, error_message, result_message, done_message,
 )
 from common.protocol.internal import serialize_article, serialize_eof, serialize_abort
 from .session import ClientSession
-
-log = logging.getLogger("gateway")
 
 # decode()/recv_frame() devuelven el tipo como nombre ("batch"); las constantes son códigos.
 _BATCH, _EOF, _RESULT, _DONE = (TYPE_NAMES[t] for t in (BATCH, EOF, RESULT, DONE))
@@ -41,7 +41,7 @@ class Gateway:
             t = threading.Thread(target=target, name=f"gw{self.gw_id}-{name}", daemon=True)
             t.start()
             self._threads.append(t)
-        log.info("Gateway %d escuchando en %s:%d", self.gw_id, self.host, self.port)
+        logger.info("gateway_started", LogResult.success, "gw_id", self.gw_id, "host", self.host, "port", self.port)
         return self.port
 
     def wait(self) -> None:
@@ -60,8 +60,13 @@ class Gateway:
         self._stop.set()
         try:
             self.broker.stop_results()
-        except Exception:
-            log.exception("error al detener el consumo de resultados")
+        except Exception as e:
+            logger.error(
+                "results_consumer_stop_failed",
+                LogResult.fail,
+                "gw_id", self.gw_id,
+                "error", e,
+            )
         with self._sessions_lock:
             sessions = list(self._sessions.values())
         for s in sessions:
@@ -71,7 +76,7 @@ class Gateway:
         if self._server is not None:
             self._server.close()
             self._server = None
-        log.info("Gateway %d detenido", self.gw_id)
+        logger.info("gateway_stopped", LogResult.success, "gw_id", self.gw_id)
 
     # ------------------------------------------------------------------ clientes
     def _accept_loop(self):
@@ -102,7 +107,7 @@ class Gateway:
         session = self._register(conn)
         publisher = None
         cid = session.client_id
-        log.info("cliente %s conectado desde %s", cid, addr)
+        logger.info("client_connected", LogResult.in_progress, "client_id", cid, "address", addr)
         try:
             publisher = self.broker.open_publisher()
             session.send(welcome_message(cid))
@@ -119,22 +124,27 @@ class Gateway:
                 elif kind == _EOF and not session.eof_sent:
                     publisher.send_year(serialize_eof(cid, self.gw_id))
                     session.eof_sent = True
-                    log.info("cliente %s terminó de enviar (%d batches)", cid, batch_id)
+                    logger.info("client_eof_received", LogResult.success, "client_id", cid, "batches", batch_id)
                 else:
                     session.send(error_message("invalid_message", f"mensaje inesperado: {kind}",
                                                cid))
                     break
         except FrameError as e:
             # mensaje que viola el protocolo (campos de más, tipo desconocido, truncado...)
-            log.info("cliente %s: %s", cid, e)
+            logger.warning("invalid_client_message", LogResult.fail, "client_id", cid, "reason", e)
             try:
                 session.send(error_message("invalid_message", str(e), cid))
             except Exception:
                 pass
         except (OSError, ConnectionError) as e:
-            log.info("cliente %s desconectado: %s", cid, e)
-        except Exception:
-            log.exception("error atendiendo al cliente %s", cid)
+            logger.warning("client_disconnected", LogResult.fail, "client_id", cid, "reason", e)
+        except Exception as e:
+            logger.error(
+                "client_handler_failed",
+                LogResult.fail,
+                "client_id", cid,
+                "error", e,
+            )
             try:
                 session.send(error_message("internal_error", "error interno del Gateway", cid))
             except Exception:
@@ -147,12 +157,17 @@ class Gateway:
             if publisher is not None:
                 try:
                     publisher.close()
-                except Exception:
-                    log.exception("error cerrando el publicador de %s", cid)
+                except Exception as e:
+                    logger.error(
+                        "publisher_close_failed",
+                        LogResult.fail,
+                        "client_id", cid,
+                        "error", e,
+                    )
 
     def _abort(self, session: ClientSession, publisher) -> None:
         """El cliente se fue (o el Gateway se apaga) sin haber recibido sus resultados."""
-        log.warning("abort del cliente %s", session.client_id)
+        logger.warning("client_aborted", LogResult.fail, "client_id", session.client_id)
         try:
             if publisher is None:
                 publisher = self.broker.open_publisher()
@@ -162,16 +177,26 @@ class Gateway:
                     publisher.close()
             else:
                 publisher.send_abort(serialize_abort(session.client_id))
-        except Exception:
-            log.exception("no se pudo publicar el abort de %s", session.client_id)
+        except Exception as e:
+            logger.error(
+                "abort_publish_failed",
+                LogResult.fail,
+                "client_id", session.client_id,
+                "error", e,
+            )
 
     # ------------------------------------------------------------------ resultados
     def _results_loop(self):
         try:
             self.broker.run_results(self._on_result)
-        except Exception:
+        except Exception as e:
             if not self._stop.is_set():
-                log.exception("se cortó el consumo de resultados; apagando el Gateway")
+                logger.error(
+                    "results_consumer_failed",
+                    LogResult.fail,
+                    "gw_id", self.gw_id,
+                    "error", e,
+                )
                 self._stop.set()
 
     def _on_result(self, body: bytes, ack, nack):
@@ -180,17 +205,31 @@ class Gateway:
             message = decode(body)
             gw_id, n = message["client_id"]
         except (ValueError, KeyError, TypeError, IndexError):
-            log.error("mensaje ilegible en out_q: se descarta")
+            logger.error(
+                "invalid_result_message",
+                LogResult.fail,
+                "gw_id", self.gw_id,
+                "reason", "mensaje ilegible en out_q",
+            )
             ack()
             return
         if gw_id != self.gw_id:
-            log.error("resultado para otro Gateway (%s): se descarta", gw_id)
+            logger.error(
+                "result_for_wrong_gateway",
+                LogResult.fail,
+                "expected_gw_id", self.gw_id,
+                "received_gw_id", gw_id,
+            )
             ack()
             return
         with self._sessions_lock:
             session = self._sessions.get(n)
         if session is None:
-            log.info("resultado para el cliente (%s,%s) que ya no está: se descarta", gw_id, n)
+            logger.info(
+                "result_for_disconnected_client",
+                LogResult.in_progress,
+                "client_id", (gw_id, n),
+            )
             ack()
             return
         try:
@@ -201,9 +240,19 @@ class Gateway:
                 session.send(done_message(session.client_id))
                 session.done = True
                 session.close()                 # el hilo del cliente termina sin abort
-                log.info("cliente %s recibió todos sus resultados", session.client_id)
+                logger.info("client_results_completed", LogResult.success, "client_id", session.client_id)
             else:
-                log.error("tipo desconocido en out_q: %s", kind)
-        except OSError:
-            log.info("cliente %s ya no responde: se descarta el resultado", session.client_id)
+                logger.error(
+                    "unknown_result_type",
+                    LogResult.fail,
+                    "client_id", session.client_id,
+                    "type", kind,
+                )
+        except OSError as e:
+            logger.warning(
+                "client_not_responding",
+                LogResult.fail,
+                "client_id", session.client_id,
+                "error", e,
+            )
         ack()
