@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import signal
@@ -19,25 +20,24 @@ STAGE = "q2"
 BIOGRAPHY_SECTIONS = {"biography", "biographie"}  
 
 
+def section_names(sections):
+    result = set()
+    for part in json.loads(sections):
+        if part.get("type") == "section" and part.get("name"):
+            result.add(part["name"].strip().lower())
+    return result
+
 def biography_rows(rows):
-    """Filas de q2_in ({name, url, sections, image_url}) -> filas de img_in
-    ({name, url, image_url}) solo de los artículos con una sección de biografía."""
     result = []
     for row in rows:
         try:
-            if any(str(s).strip().lower() in BIOGRAPHY_SECTIONS for s in row["sections"]):
-                result.append({"name": row["name"], "url": row["url"],
-                               "image_url": row["image_url"]})
-        except (KeyError, TypeError) as e:
+            if BIOGRAPHY_SECTIONS & section_names(row["sections"]):
+                result.append({"name": row["name"],"url": row["url"],"image_url": row["image_url"]})
+        except (KeyError, TypeError, ValueError) as e:
             logging.warning("fila inválida (%s: %s), se descarta", type(e).__name__, e)
     return result
 
-
 class Q2Filter:
-    """Lee batches de q2_in, deja los artículos con sección de biografía y los publica en
-    img_in. Las réplicas se coordinan por q2_ctrl para saber cuándo procesaron todos los
-    batches del cliente."""
-
     def __init__(self):
         self.id = ID
         self.rc = RabbitConnection(MOM_HOST)
