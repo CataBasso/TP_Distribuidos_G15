@@ -34,17 +34,17 @@ def test_assigns_client_ids_with_gateway_id_and_increasing_n(gw):
     assert a[0] == b[0] == 3 and b[1] == a[1] + 1
 
 
-def test_each_row_is_published_as_an_article_with_header_and_sequential_batch_ids(gw):
+def test_each_batch_is_published_as_a_batch_with_header_and_eof_carries_the_total(gw):
     gateway, broker = gw
     s, cid = connect(gateway)
     send_frame(s, {"type": "batch", "batch_id": 0, "rows": [{"url": "u1"}]})
     send_frame(s, {"type": "batch", "batch_id": 1, "rows": [{"url": "u2"}, {"url": "u3"}]})
     send_frame(s, {"type": "eof"})
-    a1, a2, a3, eof = [broker.get_year() for _ in range(4)]
-    assert a1 == {"type": "article", "client_id": cid, "batch_id": 0, "origin": 3,
-                  "article": {"url": "u1"}}
-    assert [(a["batch_id"], a["article"]["url"]) for a in (a2, a3)] == [(1, "u2"), (1, "u3")]
-    assert eof == {"type": "eof", "client_id": cid, "origin": 3}
+    b0, b1, eof = [broker.get_year() for _ in range(3)]
+    assert b0 == {"type": "batch", "client_id": cid, "batch_id": 0, "origin": 3,
+                  "rows": [{"url": "u1"}]}
+    assert (b1["type"], b1["batch_id"], b1["rows"]) == ("batch", 1, [{"url": "u2"}, {"url": "u3"}])
+    assert eof == {"type": "eof", "client_id": cid, "origin": 3, "total": 2}   # total = batches
     assert broker.aborts.empty()                 # terminó bien: nada que abortar
 
 
@@ -119,7 +119,7 @@ def test_binary_values_in_rows_and_results_survive_the_round_trip(gw):
     s, cid = connect(gateway)
     row = {"url": "u", "abstract": None, "name": "Ñandú", "image": None}
     send_frame(s, {"type": "batch", "batch_id": 0, "rows": [row]})
-    assert broker.get_year()["article"] == row
+    assert broker.get_year()["rows"] == [row]
     broker.publish_result({"type": "result", "client_id": cid, "query": 2,
                            "rows": [{"name": "n", "url": "u", "image": b"\x00\xff"}]})
     assert recv_frame(s)["rows"][0]["image"] == b"\x00\xff"

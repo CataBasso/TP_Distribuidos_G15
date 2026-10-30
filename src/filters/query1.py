@@ -21,15 +21,15 @@ def rows_in_english(rows):
     result = []
     for row in rows:
         try:
-            if row["language"] == ENGLISH:
-                result.append([row["date_modified"], row["url"]])
+            if row["lang"] == ENGLISH:
+                result.append({"date_modified": row["date_modified"], "url": row["url"]})
         except (KeyError, TypeError) as e:
             logging.warning("fila inválida (%s: %s), se descarta", type(e).__name__, e)
     return result
 
 class Q1Filter:
     def __init__(self):
-        self.id = self.ID
+        self.id = ID
         self.rc = RabbitConnection(MOM_HOST)
         self.input_queue = MessageMiddlewareQueueRabbitMQ(MOM_HOST, INPUT_QUEUE, connection=self.rc)
         self.results = MessageMiddlewareExchangeRabbitMQ(MOM_HOST, RESULTS_EXCHANGE, [], exchange_type="direct", connection=self.rc)
@@ -50,14 +50,15 @@ class Q1Filter:
         if client_id not in self.aborted:
             if message["type"] == "batch":
                 self._on_batch(client_id, message)
-        elif message["type"] == "eof":
-            self._on_eof(client_id, message)
-        else:
-            logging.warning("tipo inesperado en queries_in: %s", message["type"])
+            elif message["type"] in ("eof", "stage_eof"):
+                self._on_eof(client_id, message)
+            else:
+                logging.warning("tipo inesperado en q1_in: %s", message["type"])
+        ack()
 
     def _on_batch(self ,client_id ,message):
         parts = rows_in_english(message["rows"])
-        self._send(parts, client_id) 
+        self._send(messages.result_message(client_id, QUERY, parts, origin=self.id), client_id)
 
         self.count[client_id] = self.count.get(client_id,0) + 1
         if client_id in self.eof_total:

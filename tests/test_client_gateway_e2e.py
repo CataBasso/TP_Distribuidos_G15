@@ -63,13 +63,13 @@ def test_full_session_matches_expected_results(tmp_path):
         t.join(10); gateway.stop()
 
     # --- lo que recibió el "sistema" ---
-    articles = [m for m in seen if m["type"] == "article"]
-    ids = [m["batch_id"] for m in articles]
+    batches = [m for m in seen if m["type"] == "batch"]
+    ids = [m["batch_id"] for m in batches]
     assert ids == sorted(ids) and set(ids) == set(range(max(ids) + 1))   # batch_id 0,1,2... sin huecos
     assert {m["client_id"] for m in seen} == {(1, 1)}
-    assert len(articles) == 2246                       # un 'article' por fila del dataset
-    assert seen[-1]["type"] == "eof"
-    assert set(articles[0]["article"]) == {"url", "name", "lang", "date_modified", "abstract",
+    assert sum(len(m["rows"]) for m in batches) == 2246   # todas las filas del dataset
+    assert seen[-1]["type"] == "eof" and seen[-1]["total"] == len(batches)
+    assert set(batches[0]["rows"][0]) == {"url", "name", "lang", "date_modified", "abstract",
                                           "sections", "image_url"}
 
     # --- lo que escribió el cliente ---

@@ -17,13 +17,13 @@ def split_rows(rows):
             old = year_of(row["date_modified"]) <= YEAR
             norm_row = {
                 "url": row["url"],
-                "language": row["language"],
+                "lang": row["lang"],
                 "abstract": row["abstract"],
                 "period": PERIOD_UP_TO_2020 if old else PERIOD_FROM_2021
             }
 
             if old:
-                q1_row = {"url": row["url"], "language": row["language"],
+                q1_row = {"url": row["url"], "lang": row["lang"],
                           "date_modified": row["date_modified"]}
                 q2_row = {"name": row["name"], "url": row["url"], "sections": row["sections"], "image_url": row["image_url"]}
 

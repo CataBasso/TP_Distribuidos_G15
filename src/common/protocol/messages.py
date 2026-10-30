@@ -25,7 +25,7 @@ Q5_ARTICLE = 27
 STAGE_EOF = 28
 
 # Coordinacion entre replicas
-CONTROL: 29
+CONTROL = 29
 
 TYPE_NAMES = {
     BATCH: "batch",
@@ -69,7 +69,7 @@ REQUIRED_FIELDS = {
     ERROR: ("code", "message"),
     ARTICLE: ("article",),
     FILTERED_ARTICLE: ("query", "article"),
-    TOKENS: ("url", "language", "words", "period"),
+    TOKENS: ("url", "lang", "words", "period"),
     WORD_COUNTS: ("counts",),
     PARTIAL_TOP: ("counts",),
     AVERAGE_DATA: ("sum", "count"),
@@ -277,11 +277,11 @@ def filtered_article_message(
     }
 
 
-def tokens_message(url, language, words, period, client_id, origin=0):
+def tokens_message(url, lang, words, period, client_id, origin=0):
     return {
         "type": "tokens",
         "url": url,
-        "language": language,
+        "lang": lang,
         "words": words,
         "period": period,
         "client_id": tuple(client_id),

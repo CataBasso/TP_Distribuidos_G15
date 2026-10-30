@@ -62,7 +62,7 @@ def test_batch_goes_through_year_in_and_result_comes_back_through_out_q():
         assert (r["type"], r["query"], r["rows"]) == ("result", 3, [{"word": "ada"}])
         assert recv_frame(s)["type"] == "done"
         t.join(10)
-        assert [m["type"] for m in received] == ["article", "eof"]
+        assert [m["type"] for m in received] == ["batch", "eof"]
     finally:
         gateway.stop()
         leftover = MessageMiddlewareQueueRabbitMQ(HOST, out_queue_name(gw_id), durable=False)

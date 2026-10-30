@@ -58,8 +58,8 @@ def main():
     def on_year(body, ack, nack):
         msg = decode(body)
         cid = msg["client_id"]
-        if msg["type"] == "article":
-            articles[cid] += 1
+        if msg["type"] == "batch":
+            articles[cid] += len(msg["rows"])
         elif msg["type"] == "eof":
             log.info("cliente %s: %d articles y EOF; publico resultados", cid, articles[cid])
             for query, rows in results_for(args.expected_dir):

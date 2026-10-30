@@ -7,7 +7,8 @@ from common.protocol import (
     FrameError, recv_frame, decode, TYPE_NAMES, BATCH, EOF, RESULT, DONE,
     welcome_message, error_message, result_message, done_message,
 )
-from common.protocol.internal import serialize_article, serialize_eof, serialize_abort
+from common.protocol import batch_message, eof_message
+from common.protocol.internal import serialize, serialize_abort
 from .session import ClientSession
 
 log = logging.getLogger("gateway")
@@ -113,11 +114,13 @@ class Gateway:
                     break
                 kind = message.get("type")
                 if kind == _BATCH:
-                    for row in message["rows"]:
-                        publisher.send_year(serialize_article(row, cid, batch_id, self.gw_id))
+                    publisher.send_year(serialize(
+                        batch_message(cid, batch_id, message["rows"], origin=self.gw_id)))
                     batch_id += 1
                 elif kind == _EOF and not session.eof_sent:
-                    publisher.send_year(serialize_eof(cid, self.gw_id))
+                    # total = cantidad de batches: cada etapa lo usa para saber cuándo vio todo
+                    publisher.send_year(serialize(
+                        eof_message(cid, origin=self.gw_id, total=batch_id)))
                     session.eof_sent = True
                     log.info("cliente %s terminó de enviar (%d batches)", cid, batch_id)
                 else:
