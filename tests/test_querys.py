@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 OUTPUT_DIR = Path("output")
-EXPECTED_DIR = Path("data/expected")
+EXPECTED_DIR = Path("data/expected/medium")
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:

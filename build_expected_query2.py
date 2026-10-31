@@ -13,8 +13,8 @@ USER_AGENT = "SD1-TP-WikipediaAnalysis/1.0 (TP facultad; vfernandezd@fi.uba.ar)"
 BATCH = 50  
 PAUSE = 0.5  
 
-SOURCE = Path("data/expected/query2_source.csv")
-TARGET = Path("data/expected/query2.csv")
+SOURCE = Path("data/expected/medium/query2_source.csv")
+TARGET = Path("data/expected/medium/query2.csv")
 
 session = requests.Session()
 session.headers["User-Agent"] = USER_AGENT
