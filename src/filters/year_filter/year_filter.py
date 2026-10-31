@@ -5,7 +5,7 @@ from common.middleware.middleware_rabbitmq import (
     RabbitConnection, MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ,
 )
 from common.protocol import internal, messages
-from year_logic import split_rows
+from filters.year_filter.year_logic import split_rows
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]

@@ -8,10 +8,10 @@ from common.topology import (
     ABORT_EX, AVG_EX, AVG_PEX, PERIOD_FROM_2021, PERIOD_UP_TO_2020, Q5_PEX, RESULTS_EX,
     TOK_EX, client_key, partition,
 )
-from filters.q5_filter import Q5Filter
+from filters.q5_filter.q5_filter import Q5Filter
 from results.joiner import Joiner
-from text_processing.avg_reducer import AvgReducer
-from text_processing.length_mapper import LengthMapper
+from text_processing.avg_reducer.avg_reducer import AvgReducer
+from text_processing.length_mapper.length_mapper import LengthMapper
 
 from fakes import cleaner_eof, tokens
 

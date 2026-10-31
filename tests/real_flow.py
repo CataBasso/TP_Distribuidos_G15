@@ -52,14 +52,14 @@ def run(data_dir="data/sample/small_dataset", output_dir=None, timeout=60):
     from filters.query1 import Q1Filter
     env_for("q2_in", "img_in")
     from filters.query2 import Q2Filter
-    from filters.q5_filter import Q5Filter
+    from filters.q5_filter.q5_filter import Q5Filter
     env_for("year_in")
     from filters.year_filter import YearFilter
     env_for("img_in")
     from image.image_getter import ImageGetter
     from results.joiner import Joiner
-    from text_processing.avg_reducer import AvgReducer
-    from text_processing.length_mapper import LengthMapper
+    from text_processing.avg_reducer.avg_reducer import AvgReducer
+    from text_processing.length_mapper.length_mapper import LengthMapper
     from gateway.broker import RabbitGatewayBroker
     from gateway.gateway import Gateway
     from client.client import Client

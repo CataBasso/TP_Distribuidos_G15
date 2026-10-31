@@ -28,6 +28,20 @@ services:
     - GATEWAY_PORT=5000
     - RABBIT_HOST=rabbitmq
     - PYTHONUNBUFFERED=1
+  joiner:
+    build:
+      context: ./src/
+      dockerfile: results/Dockerfile
+    container_name: joiner
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - GW_ID=1
+    - MOM_HOST=rabbitmq
+    - WORD_PARTITIONS=1
+    - Q5_PARTITIONS=1
+    - PYTHONUNBUFFERED=1
   year_filter:
     build:
       context: ./src/
@@ -84,6 +98,48 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=img_in
     - PYTHONUNBUFFERED=1
+  length_mapper:
+    build:
+      context: ./src/
+      dockerfile: text_processing/length_mapper/Dockerfile
+    container_name: length_mapper
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=0
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=1
+    - AVG_PARTITIONS=1
+    - Q5_PARTITIONS=1
+    - PYTHONUNBUFFERED=1
+  avg_reducer:
+    build:
+      context: ./src/
+      dockerfile: text_processing/avg_reducer/Dockerfile
+    container_name: avg_reducer
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=0
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=1
+    - Q5_PARTITIONS=1
+    - PYTHONUNBUFFERED=1
+  q5_filter:
+    build:
+      context: ./src/
+      dockerfile: filters/q5_filter/Dockerfile
+    container_name: q5_filter
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=0
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=1
+    - PYTHONUNBUFFERED=1
   client_0:
     build:
       context: ./src/
@@ -91,6 +147,7 @@ services:
     container_name: client_0
     depends_on:
     - gateway
+    - joiner
     environment:
     - GATEWAY_HOST=gateway
     - GATEWAY_PORT=5000
