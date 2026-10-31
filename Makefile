@@ -73,3 +73,9 @@ run-client:
 
 run-fake-system:
 	PYTHONPATH=src $(VENV)/bin/python tools/fake_system.py --gw-id 1 --rabbit-host localhost
+# --- flujo con los componentes reales del zip + etapas 7/8 + reemplazos temporales ---
+test-real-flow:            ## todo el sistema en un proceso, sin Docker (RabbitMQ falso)
+	PYTHONPATH=src:tests .venv/bin/python tests/real_flow.py
+
+run-real-flow: rabbit-up   ## en la VM: levanta todos los procesos (después, `make run-client`)
+	./tools/run_real_flow.sh
