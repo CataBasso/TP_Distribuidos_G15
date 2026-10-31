@@ -23,8 +23,7 @@ def split_rows(rows):
             }
 
             if old:
-                q1_row = {"url": row["url"], "lang": row["lang"],
-                          "date_modified": row["date_modified"]}
+                q1_row = {"url": row["url"], "lang": row["lang"],"date_modified": row["date_modified"]}
                 q2_row = {"name": row["name"], "url": row["url"], "sections": row["sections"], "image_url": row["image_url"]}
 
         except (KeyError, ValueError, TypeError):
