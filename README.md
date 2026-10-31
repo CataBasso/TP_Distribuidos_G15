@@ -1,4 +1,4 @@
-# TP_Distribuidos_G15
+# TP Distribuidos – Grupo 15
 
 ## Client y Gateway
 
@@ -25,3 +25,25 @@ Prueba manual (cuatro terminales; el resto del sistema se reemplaza por `tools/f
 
 Tests: `make test-client-gateway` (sin broker) y `make test-gateway-rabbit` (con broker).
 Detalle de la implementación en el documento de explicación entregado junto al código.
+
+## LengthMapper, AvgReducer, Q5Filter y Joiner (tareas 7 y 8)
+
+| Etapa | Módulo | Qué hace |
+|---|---|---|
+| LengthMapper | `text_processing/length_mapper.py` | cuenta palabras únicas; ≤2020 → promedio, ≥2021 → Q5 |
+| AvgReducer | `text_processing/avg_reducer.py` | promedio por cliente (partición `crc32(client_id) % A`) |
+| Q5Filter | `filters/q5_filter.py` | spool en disco; emite los artículos con n > promedio |
+| Joiner | `results/joiner.py` | cuenta EOF por consulta (1+1+P+1+K), reenvía al Gateway y manda `done` |
+
+Nombres de colas/exchanges y formatos de mensaje: `src/common/topology.py`.
+
+Tests (sin broker): `make test-stages`.
+
+Prueba manual con RabbitMQ (3 terminales):
+
+    make rabbit-up
+    make run-stages        # terminal 1: 2 LengthMapper, 2 AvgReducer, 2 Q5Filter, 1 Joiner
+    make demo-watch        # terminal 2: lee out_q.1 y verifica (espera hasta 30 s)
+    make demo-feed         # terminal 3: publica tokens, EOF y resultados Q1-Q4 simulados
+
+Resultado esperado: `Q5 n = [6, 8]` y `=> OK`. Variables de cada etapa: ver `main()` del módulo.

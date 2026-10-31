@@ -54,3 +54,32 @@ class _Publisher:
 
     def close(self):
         self.closed = True
+
+
+# --- helpers para probar las etapas con InMemoryBus (tareas 7 y 8) ---
+from common.bus import InMemoryBus  # noqa: E402
+from common.protocol.messages import (  # noqa: E402
+    abort_message, eof_message, result_message, tokens_message,
+)
+from common.topology import RESULTS_EX, TOK_EX, OUT_Q, queue_of  # noqa: E402
+
+
+def tokens(client_id, url, words, period, batch_id=0, origin=0):
+    m = tokens_message(url, "en", words, period, client_id, origin=origin)
+    m["batch_id"] = batch_id
+    return encode(m)
+
+
+def cleaner_eof(client_id, origin=0):
+    return encode(eof_message(client_id, origin=origin))
+
+
+def query_eof(client_id, query, origin=0):
+    m = eof_message(client_id, origin=origin)
+    m["query"] = query
+    return encode(m)
+
+
+def out_messages(bus, gw_id):
+    """Todo lo que el Joiner del Gateway gw_id publicó en out_q.<gw_id>, decodificado."""
+    return [decode(b) for b in bus.bodies("", queue_of(OUT_Q, gw_id))]
