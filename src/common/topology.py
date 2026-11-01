@@ -6,6 +6,11 @@ ABORT_EX = "abort_ex"   #Gateway -> todas las etapas con estado por cliente
 TOK_EX = "tok_ex"   #AbstractCleaner -> {WordMapper, LengthMapper}
 LM_IN = "lm_in" #Cola de LengthMapper
 LM_CTRL = "lm_ctrl" #EOF entre las replicas de LengthMapper
+WM_IN = "wm_in"  #Cola de WordMapper
+WM_CTRL = "wm_ctrl" #EOF entre las replicas de WordMapper
+WORDS_EX = "words_ex"   #WordMapper -> WordReducer (hash por palabra)
+WORDS_Q = "words_q" #Una cola por particion del WordReducer
+TOP_IN = "top_in"   #Cola del TopMerger: tops locales de los WordReducer
 AVG_PEX = "avg_pex" #LengthMapper -> AvgReducer (hash por cliente)
 AVG_IN = "avg_in"   #una cola por particion del AvgReducer
 AVG_EX = "avg_ex"   #AvgReducer -> todos los Q5Filter (avg_ready)
@@ -16,17 +21,21 @@ RESULTS_EX = "results_ex"   #Todos los productores de resultados -> Joiner (clav
 RESULTS_Q = "results_q" #Cola del Joiner del Gateway
 OUT_Q = "out_q" #Joiner[g] -> Gateway g
 
-EXCHANGE_KINDS = {TOK_EX: "fanout", LM_CTRL: "fanout", AVG_EX: "fanout", ABORT_EX: "fanout"}
+EXCHANGE_KINDS = {TOK_EX: "fanout", LM_CTRL: "fanout", WM_CTRL: "fanout", AVG_EX: "fanout", ABORT_EX: "fanout"}
 
 #Nombres de etapa
 STAGE_ABSTRACT_CLEANER = "abstract_cleaner"
 STAGE_LENGTH_MAPPER = "length_mapper"
+STAGE_WORD_MAPPER = "word_mapper"
 STAGE_AVG_REDUCER = "avg_reducer"
 STAGE_Q5_FILTER = "q5_filter"
 
 #Etiquetas de peroodo que pone el YearFilter y conserva el AbstractCleaner
 PERIOD_UP_TO_2020 = "<=2020"
 PERIOD_FROM_2021 = ">=2021"
+
+#Tamano del top de Q4
+TOP_N = 20
 
 #MAx cant de filas de cada mensaje 'result'
 RESULT_CHUNK_ROWS = 500

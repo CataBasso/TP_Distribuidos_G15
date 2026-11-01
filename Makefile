@@ -5,20 +5,35 @@ QUERY_TEST_FILE = tests/test_querys.py
 MIDDLEWARE_TEST_FILE = tests/test_middleware.py
 PROTOCOL_TEST_FILE = tests/test_protocol.py
 
-.PHONY: setup rabbit-up rabbit-down test-unit test-integration
+.PHONY: setup up down rabbit-up rabbit-down test-unit test-integration logs
 
 setup:
 	python3 -m venv $(VENV)
 	$(PIP) install -r requirements.txt
 
 up:
-	@echo "TODO: docker compose up -d (cuando exista el compose)"
-
+	mkdir -p output
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	docker compose -f docker-compose.yaml logs --follow
 down:
-	@echo "TODO: docker compose down"
+	docker compose -f docker-compose.yaml stop -t 5
+	docker compose -f docker-compose.yaml down
+
+# Prueba de escalabilidad: genera docker-compose.scale.yaml y lo levanta.
+# Ej: make up-scale ARGS="--lmap 4 --words 4 --no-q2 --clients 2"   (ver tools/gen_compose_scale.py)
+up-scale:
+	python3 tools/gen_compose_scale.py $(ARGS)
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.scale.yaml up --build --remove-orphans --detach
+	docker compose -f docker-compose.scale.yaml logs --follow
+
+down-scale:
+	docker compose -f docker-compose.scale.yaml down -v --remove-orphans
 
 test:
 	$(PYTEST) $(UNIT_TEST_FILE)
+
+logs:
+	docker compose -f docker-compose.yaml logs
 
 test-query1:
 	$(PYTEST) $(UNIT_TEST_FILE)::test_query1 -v
@@ -69,7 +84,7 @@ run-gateway:
 	PYTHONPATH=src GATEWAY_ID=1 RABBIT_HOST=localhost $(VENV)/bin/python -m gateway
 
 run-client:
-	PYTHONPATH=src $(VENV)/bin/python -m client --data-dir data/sample/small_dataset --output-dir output
+	PYTHONPATH=src $(VENV)/bin/python -m client --data-dir data/sample/medium_dataset --output-dir output
 
 run-fake-system:
 	PYTHONPATH=src $(VENV)/bin/python tools/fake_system.py --gw-id 1 --rabbit-host localhost

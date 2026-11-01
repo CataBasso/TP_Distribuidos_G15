@@ -1,5 +1,5 @@
 '''
-Módulo para cargar y usar las palabras vacías (stop words) en español y francés.
+Módulo para cargar y usar las palabras vacías (stop words) en ingles y francés.
 
 Usar de la siguiente manera:
     from common.stopwords import STOP_WORDS

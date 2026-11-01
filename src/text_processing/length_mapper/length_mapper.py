@@ -8,6 +8,8 @@ from common.topology import (
     AVG_IN, AVG_PEX, LM_CTRL, LM_IN, PERIOD_FROM_2021, PERIOD_UP_TO_2020, Q5_IN, Q5_PEX,
     STAGE_ABSTRACT_CLEANER, TOK_EX, client_key, partition, queue_of,
 )
+from common.bus import RabbitBus
+from common.runner import broker_host, env_int, env_str, run_stage
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +24,8 @@ class LengthMapper(Stage):
         self.A, self.K = avg_partitions, q5_partitions
         self.flush_every = flush_every
         self.eofs = EofCounter(upstream_replicas)
-        self._acc = {}  
+        self._acc = {}
+        self._sent = {}
         self.stats = {"articles": 0, "skipped_null": 0, "unknown_period": 0}
 
     def start(self) -> None:
@@ -84,6 +87,7 @@ class LengthMapper(Stage):
         total, count, batch_id = acc
         body = encode(average_data_message(client_id, batch_id, total, count,
                                            origin=self.replica_id))
+        self._sent[client_id] = self._sent.get(client_id, 0) + 1
         self.bus.send(AVG_PEX, body, key=str(partition(client_key(client_id), self.A)))
 
     #Coordinacion de EOFs
@@ -96,8 +100,9 @@ class LengthMapper(Stage):
 
     def _finish(self, client_id) -> None:
         self._flush(client_id)
+        avg_eof = eof_message(client_id, origin=self.replica_id, total=self._sent.pop(client_id, 0))
+        self.bus.send(AVG_PEX, encode(avg_eof), key=str(partition(client_key(client_id), self.A)))
         eof = encode(eof_message(client_id, origin=self.replica_id))
-        self.bus.send(AVG_PEX, eof, key=str(partition(client_key(client_id), self.A)))
         for k in range(self.K):
             self.bus.send(Q5_PEX, eof, key=str(k))
         self.eofs.forget(client_id)
@@ -105,12 +110,11 @@ class LengthMapper(Stage):
 
     def on_abort(self, client_id) -> None:
         self._acc.pop(client_id, None)
+        self._sent.pop(client_id, None)
         self.eofs.forget(client_id)
 
 
 def main() -> None:
-    from common.bus import RabbitBus
-    from common.runner import broker_host, env_int, env_str, run_stage
     bus = RabbitBus(broker_host())
     run_stage(LengthMapper(bus, env_int("REPLICA_ID", alt="ID"), env_int("CLEANER_REPLICAS"),
                            env_int("AVG_PARTITIONS"), env_int("Q5_PARTITIONS"),
