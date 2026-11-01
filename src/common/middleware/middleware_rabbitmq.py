@@ -15,7 +15,7 @@ class RabbitConnection(MessageMiddlewareConnection):
     """Una conexión y un canal. Varios endpoints del mismo proceso pueden compartirla
     para escuchar de varias colas (datos, ctrl, abort) en un único loop."""
 
-    def __init__(self, host, heartbeat=600, retries=10, delay=1.0, confirm=False):
+    def __init__(self, host, heartbeat=600, retries=10, delay=1.0, confirm=False, prefetch=10):
         self.host = host
         self.confirm = confirm
         params = pika.ConnectionParameters(host=host, heartbeat=heartbeat, blocked_connection_timeout=300)
@@ -31,7 +31,7 @@ class RabbitConnection(MessageMiddlewareConnection):
             raise MessageMiddlewareDisconnectedError(str(last_error))
         
         self.channel = self.connection.channel()
-        self.channel.basic_qos()
+        self.channel.basic_qos(prefetch_count=prefetch)
         if confirm:
             self.channel.confirm_delivery()
 

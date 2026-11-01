@@ -99,18 +99,12 @@ class RabbitBus:
     """Bus sobre common.middleware. Una conexión (RabbitConnection) por proceso: todas las
     colas que se consumen comparten el hilo, y los callbacks corren de a uno."""
 
-    def __init__(self, host, prefetch=1, durable=True, kinds=None):
+    def __init__(self, host, prefetch=10, durable=True, kinds=None):
         from common.middleware import RabbitConnection
         from common.topology import EXCHANGE_KINDS
         self.host, self.durable = host, durable
         self.kinds = dict(EXCHANGE_KINDS if kinds is None else kinds)
-        # El RabbitConnection actual del equipo no recibe 'prefetch' (hace basic_qos() sin
-        # argumentos); versiones anteriores sí. Se lo pasa solo si lo acepta.
-        import inspect
-        if "prefetch" in inspect.signature(RabbitConnection.__init__).parameters:
-            self.rc = RabbitConnection(host, prefetch=prefetch)
-        else:
-            self.rc = RabbitConnection(host)
+        self.rc = RabbitConnection(host, prefetch=prefetch)
         self._endpoints = {}
         self._consumers = []
 
