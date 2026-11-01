@@ -16,7 +16,7 @@ from common.protocol import internal, messages
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
 INPUT_QUEUE = os.environ.get("INPUT_QUEUE", "img_in")
-USER_AGENT = os.environ.get("USER_AGENT", "SD1-TP-WikipediaAnalysis/1.0 (TP facultad)")
+USER_AGENT = os.environ.get("USER_AGENT", "SD1-TP-WikipediaAnalysis/1.0 (TP facultad; vfernandezd@fi.uba.ar)")
 RESULTS_EXCHANGE = "results_ex"
 IMG_CONTROL_EXCHANGE = "img_ctrl"
 ABORT_EXCHANGE = "abort_ex"
