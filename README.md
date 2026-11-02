@@ -72,3 +72,35 @@ Prueba manual con RabbitMQ (3 terminales):
 
 Resultado esperado: `Q5 n = [6, 8]` y `=> OK`. Variables de cada etapa: ver `main()` del módulo.
 
+
+## Escenarios de réplicas
+
+`tools/scenarios.py` es la única fuente de verdad de "cuántas réplicas de cada proceso": de ahí
+salen los `docker-compose` de cada caso (`scenarios/N.yaml`) y las corridas sin Docker
+(`tests/real_flow.py`). Las variables que dependen de las cantidades (`CLEANER_REPLICAS`,
+`LM_REPLICAS`, `WM_REPLICAS`, `AVG_PARTITIONS`, `Q5_PARTITIONS`, `WORD_PARTITIONS`) se calculan
+solas, así nunca quedan desincronizadas con las réplicas levantadas.
+
+| N | Caso |
+|---|------|
+| 1 | Un cliente, una réplica de cada etapa |
+| 2 | 3 clientes, una réplica de cada etapa |
+| 3 | 3 clientes, filtros replicados (year, q1, q2, imágenes) |
+| 4 | 3 clientes, rama de longitud/Q5 replicada (ac, lm, A, K) |
+| 5 | 3 clientes, rama de palabras/Q3-Q4 replicada (ac, wm, P) |
+| 6 | 3 clientes, todo replicado |
+| 100+ | aleatorios (`make scenarios RANDOM_N=5 SEED=3`) |
+
+Sin Docker (RabbitMQ falso, Wikimedia simulada):
+
+    make test-scenarios                    # los 6 fijos
+    make test-random RANDOM_N=10 SEED=3    # aleatorios
+
+Con Docker (como `make switch` / `make test` de tp-coordinacion):
+
+    make switch N=4          # genera scenarios/*.yaml y copia el 4 a docker-compose.yaml
+    make test-scenario       # up --build, espera a los client_*, compara output/client_<i> y baja todo
+    make test-scenario SIZE=medium    # con medium_dataset / data/expected/medium
+
+Cada cliente escribe en `output/client_<i>/` y se compara contra `data/expected/<size>/`.
+Para otra combinación a mano: agregar una entrada a `SCENARIOS` en `tools/scenarios.py`.

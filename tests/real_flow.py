@@ -1,10 +1,13 @@
 """
-Corre todo el sistema en un solo proceso, con los componentes reales del zip (Client, Gateway,
-YearFilter, Q1, Q2, ImageGetter) + las etapas de las tareas 7 y 8 + los reemplazos temporales
-(devtools.stand_ins) sobre un RabbitMQ falso (tests/fake_rabbit.py). Sin Docker.
-Imprime qué entró, qué salió y lo compara contra data/expected.
+Corre todo el sistema real en un solo proceso, sin Docker: Client(s), Gateway, YearFilter, Q1, Q2,
+ImageGetter (Wikimedia simulada), AbstractCleaner, LengthMapper, AvgReducer, Q5Filter,
+WordMapper, WordReducer, TopMerger y Joiner, sobre un RabbitMQ falso (tests/fake_rabbit.py).
+La cantidad de réplicass sale de un escenario de tools/scenarios.py (los mismos que generan los
+docker-compose), así que una corrida en memoria prueba la misma topología que el compose.
+
+    PYTHONPATH=src:tests:tools python tests/real_flow.py [escenario ...] [--random N --seed S]
+        (sin argumentos corre todos los escenarios fijos)
 """
-import csv
 import logging
 import os
 import shutil
@@ -18,12 +21,15 @@ os.environ.update({"ID": "0", "MOM_HOST": "fake", "INPUT_QUEUE": "year_in", "Q1_
                    "Q2_QUEUE": "q2_in", "NORM_QUEUE": "norm_in", "OUTPUT_QUEUE": "img_in"})
 
 import fake_rabbit  # noqa: E402
+import scenarios as scn  # noqa: E402
 
-A, K, P, LM = 2, 2, 1, 2          # particiones avg, particiones Q5, particiones de palabras, réplicas LM
+DATASET = os.environ.get("DATASET", "data/sample/small_dataset")
+EXPECTED = os.environ.get("EXPECTED_DIR", "data/expected/small")
+PURGE = ("filters", "image", "gateway", "client", "results", "text_processing", "devtools")
 
 
 class StubWiki:
-    """Reemplaza a Wikimedia (la VM/sandbox no sale a internet): todo título tiene imagen."""
+    """Reemplaza a Wikimedia (el sandbox no sale a internet): todo título tiene imagen."""
     def original_urls(self, host, titles):
         return {t: f"http://stub/{host}/{t}" for t in titles}
 
@@ -31,115 +37,150 @@ class StubWiki:
         return b"img:" + url.encode()
 
 
-def run(data_dir="data/sample/small_dataset", output_dir=None, timeout=60):
+def run(s, data_dir=DATASET, output_dir=None, timeout=120):
+    """Corre el escenario s (dict completo de réplicas). Devuelve (terminó, segundos, carpeta)."""
     output_dir = Path(output_dir or tempfile.mkdtemp(prefix="out_"))
     spool = Path(tempfile.mkdtemp(prefix="spool_"))
     fake_rabbit.install()
-    for m in [m for m in sys.modules if m.split(".")[0] in
-              ("filters", "image", "gateway", "client", "devtools", "common") and m != "common"
-              and not m.startswith("common.middleware") and not m.startswith("common.protocol")]:
+    for m in [m for m in sys.modules if m.split(".")[0] in PURGE]:
         del sys.modules[m]
+    import importlib
 
-    from common.bus import RabbitBus
-    from devtools.stand_ins import StandInCleaner, StandInWordStage
-    def env_for(input_queue, output_queue=None):
-        # Cada componente real lee INPUT_QUEUE/OUTPUT_QUEUE al IMPORTARSE (como en su contenedor)
-        os.environ["INPUT_QUEUE"] = input_queue
+    def load(module, input_queue=None, output_queue=None):
+        # Los componentes reales leen INPUT_QUEUE/OUTPUT_QUEUE al IMPORTARSE (como en su contenedor)
+        if input_queue:
+            os.environ["INPUT_QUEUE"] = input_queue
         if output_queue:
             os.environ["OUTPUT_QUEUE"] = output_queue
+        return importlib.import_module(module)
 
-    env_for("q1_in")
-    from filters.query1 import Q1Filter
-    env_for("q2_in", "img_in")
-    from filters.query2 import Q2Filter
+    from common.bus import RabbitBus
+    q1 = load("filters.q1_filter.query1", "q1_in")
+    q2 = load("filters.q2_filter.query2", "q2_in", "img_in")
+    yf = load("filters.year_filter.year_filter", "year_in")
+    ig = load("image.image_getter", "img_in")
+    ac = load("text_processing.abstract_cleaner.abstract_cleaner", "norm_in")
     from filters.q5_filter.q5_filter import Q5Filter
-    env_for("year_in")
-    from filters.year_filter import YearFilter
-    env_for("img_in")
-    from image.image_getter import ImageGetter
     from results.joiner import Joiner
     from text_processing.avg_reducer.avg_reducer import AvgReducer
     from text_processing.length_mapper.length_mapper import LengthMapper
+    from text_processing.top_merger.top_merger import TopMerger
+    from text_processing.word_mapper.word_mapper import WordMapper
+    from text_processing.word_reducer.word_reducer import WordReducer
     from gateway.broker import RabbitGatewayBroker
     from gateway.gateway import Gateway
     from client.client import Client
 
-    threads, stops = [], []
+    stops = []
 
     def spawn(name, fn):
-        t = threading.Thread(target=fn, name=name, daemon=True)
-        t.start()
-        threads.append(t)
+        threading.Thread(target=fn, name=name, daemon=True).start()
 
-    def real(component):                       # componentes del zip: setup_consumers + rc.run
-        component.setup_consumers()
-        stops.append(component.rc.stop)
-        spawn(type(component).__name__, component.rc.run)
+    def real(mod, cls, i, *a, **kw):           # componentes de la otra gente: leen ID del módulo
+        mod.ID = i
+        c = getattr(mod, cls)(*a, **kw)
+        c.setup_consumers()
+        stops.append(c.rc.stop)
+        spawn(f"{cls}{i}", c.rc.run)
 
-    def mine(stage):                           # mis etapas: Stage.start + bus.run
+    def mine(stage):                           # etapas con Stage: start() + bus.run()
         stage.start()
         stops.append(stage.bus.stop)
         spawn(stage.name, stage.bus.run)
 
     bus = lambda: RabbitBus("fake")
-    # Los que declaran colas de resultados / entradas primero, para no perder mensajes.
+    AC, LM, WM, P, A, K = s["ac"], s["lm"], s["wm"], s["P"], s["A"], s["K"]
+    # Primero el final de la cadena: así cada cola existe antes de que se publique en ella.
     mine(Joiner(bus(), 1, P, K))
     for k in range(K):
         mine(Q5Filter(bus(), k, LM, spool / f"q5_{k}"))
     for a in range(A):
         mine(AvgReducer(bus(), a, LM, K))
+    mine(TopMerger(bus(), P))
+    for p in range(P):
+        mine(WordReducer(bus(), p, WM))
+    for r in range(WM):
+        mine(WordMapper(bus(), r, AC, P))
     for r in range(LM):
-        mine(LengthMapper(bus(), r, 1, A, K))
-    mine(StandInCleaner(bus()))
-    mine(StandInWordStage(bus(), P))
-    real(ImageGetter(wiki=StubWiki()))
-    real(Q1Filter())
-    real(Q2Filter())
-    real(YearFilter())
+        mine(LengthMapper(bus(), r, AC, A, K))
+    for i in range(AC):
+        real(ac, "AbstractCleaner", i)
+    for i in range(s["img"]):
+        real(ig, "ImageGetter", i, wiki=StubWiki())
+    for i in range(s["q1"]):
+        real(q1, "Q1Filter", i)
+    for i in range(s["q2"]):
+        real(q2, "Q2Filter", i)
+    for i in range(s["year"]):
+        real(yf, "YearFilter", i)
 
     gateway = Gateway(1, RabbitGatewayBroker("fake", 1), "127.0.0.1", 0)
     port = gateway.start()
     t0 = time.time()
-    client = Client("127.0.0.1", port, data_dir, str(output_dir), 100, 10_000_000)
-    ct = threading.Thread(target=client.run, daemon=True)
-    ct.start()
-    ct.join(timeout)
-    elapsed = time.time() - t0
-    finished = not ct.is_alive()
-    gateway.stop()
-    for s in stops:
+    errors = []
+
+    def run_client(c):
         try:
-            s()
-        except Exception:
+            Client("127.0.0.1", port, data_dir, str(output_dir / f"client_{c}"), 100, 10_000_000).run()
+        except Exception as e:                  # noqa: BLE001
+            errors.append(f"client_{c}: {e}")
+
+    cts = [threading.Thread(target=run_client, args=(c,), daemon=True) for c in range(s["clients"])]
+    for t in cts:
+        t.start()
+    for t in cts:
+        t.join(max(0.1, timeout - (time.time() - t0)))
+    finished = not any(t.is_alive() for t in cts) and not errors
+    elapsed = time.time() - t0
+    gateway.stop()
+    for stop in stops:
+        try:
+            stop()
+        except Exception:                       # noqa: BLE001
             pass
     fake_rabbit.uninstall()
     shutil.rmtree(spool, ignore_errors=True)
+    if errors:
+        print("   ", "; ".join(errors))
     return finished, elapsed, output_dir
 
 
-def rows(path):
-    with Path(path).open(encoding="utf-8", newline="") as f:
-        return list(csv.DictReader(f))
+from verify_output import compare, ok_report, rows  # noqa: E402,F401  (tools/)
 
 
-def compare(output_dir, expected_dir="data/expected"):
-    report = {}
-    for q, key in ((1, ("url",)), (2, ("name", "url")), (3, ("word",)), (4, ("word", "count")),
-                   (5, ("url", "abstract_word_count"))):
-        got = rows(Path(output_dir) / f"output_query_{q}.csv")
-        exp = rows(Path(expected_dir) / f"query{q}.csv")
-        g = {tuple(r[k] for k in key) for r in got}
-        e = {tuple(r[k] for k in key) for r in exp}
-        report[q] = (len(got), len(exp), len(g & e), len(g - e), len(e - g))
-    return report
+def check(output_dir, clients, expected=EXPECTED):
+    """True si el CSV de cada cliente coincide con el esperado."""
+    return all(ok_report(compare(Path(output_dir) / f"client_{c}", expected)) for c in range(clients))
+
+
+def main(argv=None):
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("scenarios", nargs="*", type=int)
+    p.add_argument("--random", type=int, default=0)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--timeout", type=int, default=120)
+    a = p.parse_args(argv)
+    logging.basicConfig(level=getattr(logging, os.environ.get("LVL", "WARNING")))
+    names = a.scenarios or ([] if a.random else list(scn.SCENARIOS))
+    todo = {n: scn.full(scn.SCENARIOS[n][1]) for n in names}
+    import random
+    rng = random.Random(a.seed)
+    for i in range(a.random):
+        todo[100 + i] = scn.random_scenario(rng)
+    bad = 0
+    for n, s in todo.items():
+        finished, secs, out = run(s, timeout=a.timeout)
+        good = finished and check(out, s["clients"])
+        bad += not good
+        print(f"[{'OK ' if good else 'FALLA'}] escenario {n:>3}  {secs:5.1f}s  {scn.describe(s)}")
+        if not good:
+            for c in range(s["clients"]):
+                rep = compare(Path(out) / f"client_{c}", EXPECTED)
+                print(f"     client_{c}: " + "  ".join(
+                    f"Q{q}:{hit}/{ne}(+{ex}/-{mi})" for q, (_, ne, hit, ex, mi) in rep.items()))
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=getattr(logging, os.environ.get("LVL","WARNING")))
-    data = sys.argv[1] if len(sys.argv) > 1 else "data/sample/small_dataset"
-    out = sys.argv[2] if len(sys.argv) > 2 else None
-    ok, secs, out_dir = run(data, out)
-    print(f"terminó: {ok}  ({secs:.1f}s)  salida: {out_dir}")
-    print("query | filas obtenidas | esperadas | coinciden | sobran | faltan")
-    for q, (n, ne, hit, extra, miss) in compare(out_dir).items():
-        print(f"  Q{q}  | {n:5d} | {ne:5d} | {hit:5d} | {extra:4d} | {miss:4d}")
+    sys.exit(main())

@@ -86,9 +86,27 @@ run-client:
 
 run-fake-system:
 	PYTHONPATH=src $(VENV)/bin/python tools/fake_system.py --gw-id 1 --rabbit-host localhost
-# --- flujo con los componentes reales del zip + etapas 7/8 + reemplazos temporales ---
-test-real-flow:            ## todo el sistema en un proceso, sin Docker (RabbitMQ falso)
-	PYTHONPATH=src:tests .venv/bin/python tests/real_flow.py
 
-run-real-flow: rabbit-up   ## en la VM: levanta todos los procesos (después, `make run-client`)
-	./tools/run_real_flow.sh
+# --- escenarios de réplicas (tools/scenarios.py): ver README, sección "Escenarios" ---
+.PHONY: scenarios switch test-scenario test-scenarios test-random
+
+scenarios:                 ## regenera scenarios/*.yaml (SIZE=small|medium, RANDOM=N, SEED=S)
+	python3 tools/scenarios.py generate --size $(or $(SIZE),small) --random $(or $(RANDOM_N),0) --seed $(or $(SEED),0)
+
+switch: scenarios          ## copia un escenario a docker-compose.yaml (make switch N=4, o interactivo)
+	@python3 tools/scenarios.py list; \
+	n="$(N)"; if [ -z "$$n" ]; then read -p "Selecciona uno: " n; fi; \
+	python3 tools/scenarios.py switch $$n
+
+test-scenario:             ## con Docker: levanta docker-compose.yaml, espera a los clientes y compara
+	mkdir -p output && rm -rf ./output/*
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	python3 tools/verify_output.py --wait --expected data/expected/$(or $(SIZE),small); EXIT_CODE=$$?; \
+	docker compose -f docker-compose.yaml stop -t 5; docker compose -f docker-compose.yaml down; \
+	exit $$EXIT_CODE
+
+test-scenarios:            ## SIN Docker: corre todos los escenarios fijos en un proceso (RabbitMQ falso)
+	PYTHONPATH=src:tests:tools $(VENV)/bin/python tests/real_flow.py
+
+test-random:               ## SIN Docker: N escenarios aleatorios (make test-random RANDOM_N=10 SEED=3)
+	PYTHONPATH=src:tests:tools $(VENV)/bin/python tests/real_flow.py --random $(or $(RANDOM_N),10) --seed $(or $(SEED),0)

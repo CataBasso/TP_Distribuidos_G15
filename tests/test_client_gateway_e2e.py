@@ -11,7 +11,7 @@ from fakes import InMemoryBroker
 from gateway.gateway import Gateway
 
 SAMPLE = Path("data/sample/small_dataset")
-EXPECTED = Path("data/expected")
+EXPECTED = Path("data/expected/small")
 pytestmark = pytest.mark.skipif(not (SAMPLE.exists() and EXPECTED.exists()),
                                 reason="faltan los datos de ejemplo")
 CHUNK = 100
