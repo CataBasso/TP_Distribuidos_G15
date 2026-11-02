@@ -140,6 +140,62 @@ services:
     - MOM_HOST=rabbitmq
     - LM_REPLICAS=1
     - PYTHONUNBUFFERED=1
+  abstract_cleaner:
+    build:
+      context: ./src/
+      dockerfile: text_processing/abstract_cleaner/Dockerfile
+    container_name: abstract_cleaner
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      word_mapper:
+        condition: service_started
+      length_mapper:
+        condition: service_started
+    environment:
+    - ID=0
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
+  word_mapper:
+    build:
+      context: ./src/
+      dockerfile: text_processing/word_mapper/Dockerfile
+    container_name: word_mapper
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=0
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=1
+    - WORD_PARTITIONS=1
+    - PYTHONUNBUFFERED=1
+  word_reducer:
+    build:
+      context: ./src/
+      dockerfile: text_processing/word_reducer/Dockerfile
+    container_name: word_reducer
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=0
+    - MOM_HOST=rabbitmq
+    - WM_REPLICAS=1
+    - PYTHONUNBUFFERED=1
+  top_merger:
+    build:
+      context: ./src/
+      dockerfile: text_processing/top_merger/Dockerfile
+    container_name: top_merger
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - MOM_HOST=rabbitmq
+    - WORD_PARTITIONS=1
+    - PYTHONUNBUFFERED=1
   client_0:
     build:
       context: ./src/
@@ -155,5 +211,5 @@ services:
     - OUTPUT_DIR=/output
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/small_dataset:/data:ro
+    - ./data/sample/medium_dataset:/data:ro
     - ./output:/output

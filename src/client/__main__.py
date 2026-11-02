@@ -13,7 +13,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Cliente del análisis de artículos de Wikipedia")
     p.add_argument("--gateway-host", default=env("GATEWAY_HOST", "localhost"))
     p.add_argument("--gateway-port", type=int, default=int(env("GATEWAY_PORT", "5000")))
-    p.add_argument("--data-dir", default=env("DATA_DIR", "data/sample/small_dataset"))
+    p.add_argument("--data-dir", default=env("DATA_DIR", "data/sample/medium_dataset"))
     p.add_argument("--output-dir", default=env("OUTPUT_DIR", "output"))
     p.add_argument("--batch-rows", type=int, default=int(env("BATCH_ROWS", DEFAULT_BATCH_ROWS)))
     p.add_argument("--batch-bytes", type=int, default=int(env("BATCH_BYTES", DEFAULT_BATCH_BYTES)))

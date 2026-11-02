@@ -5,7 +5,7 @@ QUERY_TEST_FILE = tests/test_querys.py
 MIDDLEWARE_TEST_FILE = tests/test_middleware.py
 PROTOCOL_TEST_FILE = tests/test_protocol.py
 
-.PHONY: setup up down rabbit-up rabbit-down test-unit test-integration logs
+.PHONY: setup up down rabbit-up rabbit-down test test-unit test-integration logs
 
 setup:
 	python3 -m venv $(VENV)
@@ -19,36 +19,34 @@ down:
 	docker compose -f docker-compose.yaml stop -t 5
 	docker compose -f docker-compose.yaml down
 
-# Prueba de escalabilidad: genera docker-compose.scale.yaml y lo levanta.
-# Ej: make up-scale ARGS="--lmap 4 --words 4 --no-q2 --clients 2"   (ver tools/gen_compose_scale.py)
-up-scale:
-	python3 tools/gen_compose_scale.py $(ARGS)
-	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.scale.yaml up --build --remove-orphans --detach
-	docker compose -f docker-compose.scale.yaml logs --follow
-
-down-scale:
-	docker compose -f docker-compose.scale.yaml down -v --remove-orphans
-
 test:
-	$(PYTEST) $(UNIT_TEST_FILE)
+	mkdir -p output
+	rm -rf ./output/*
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	docker logs --follow client_0
+	docker wait client_0
+	$(PYTEST) $(QUERY_TEST_FILE) -v; EXIT_CODE=$$?; \
+	docker compose -f docker-compose.yaml stop -t 5; \
+	docker compose -f docker-compose.yaml down; \
+	exit $$EXIT_CODE
 
 logs:
 	docker compose -f docker-compose.yaml logs
 
 test-query1:
-	$(PYTEST) $(UNIT_TEST_FILE)::test_query1 -v
+	$(PYTEST) $(QUERY_TEST_FILE)::test_query1 -v
 
 test-query2:
-	$(PYTEST) $(UNIT_TEST_FILE)::test_query2 -v
+	$(PYTEST) $(QUERY_TEST_FILE)::test_query2 -v
 
 test-query3:
-	$(PYTEST) $(UNIT_TEST_FILE)::test_query3 -v
+	$(PYTEST) $(QUERY_TEST_FILE)::test_query3 -v
 
 test-query4:
-	$(PYTEST) $(UNIT_TEST_FILE)::test_query4 -v
+	$(PYTEST) $(QUERY_TEST_FILE)::test_query4 -v
 
 test-query5:
-	$(PYTEST) $(UNIT_TEST_FILE)::test_query5 -v
+	$(PYTEST) $(QUERY_TEST_FILE)::test_query5 -v
 
 test-protocol:
 	$(PYTEST) $(PROTOCOL_TEST_FILE) -v

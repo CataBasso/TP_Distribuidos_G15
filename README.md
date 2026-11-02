@@ -6,7 +6,7 @@ Cómo correrlos (con RabbitMQ levantado: `make rabbit-up`):
 
     make setup
     make run-gateway     # terminal 1: escucha en :5000
-    make run-client      # terminal 2: envía data/sample/small_dataset y escribe output/
+    make run-client      # terminal 2: envía data/sample/medium_dataset y escribe output/
 
 El cliente escribe `output/output_query_1.csv` … `output_query_5.csv` y `output/images/`
 (las imágenes de Q2, nombradas por su sha256), que son los archivos que compara
@@ -25,6 +25,30 @@ Prueba manual (cuatro terminales; el resto del sistema se reemplaza por `tools/f
 
 Tests: `make test-client-gateway` (sin broker) y `make test-gateway-rabbit` (con broker).
 Detalle de la implementación en el documento de explicación entregado junto al código.
+
+## Test de las queries
+
+    make test
+
+Levanta todo el sistema con Docker Compose (`docker-compose.yaml`), espera a que `client_0`
+termine de enviar `data/sample/medium_dataset` y recibir los resultados en `output/`, corre
+`tests/test_querys.py` (compara contra `data/expected/medium`) y baja el sistema, sin
+importar si los tests pasaron o fallaron. El código de salida es el de pytest.
+`output/` se vacía al empezar.
+
+Para una sola query, con el sistema ya corrido y `output/` completo: `make test-query1` … `make test-query5`.
+
+## Levantar y bajar el sistema
+
+    make up      # construye las imágenes y levanta todo; luego sigue los logs
+    make down    # detiene y elimina los contenedores
+
+`make up` crea `output/` si no existe, corre `docker compose up --build --remove-orphans --detach`
+sobre `docker-compose.yaml` y deja corriendo `docker compose logs --follow` con los logs de todas
+las réplicas. Ctrl+C corta los logs pero **no** baja el sistema. `client_0` envía
+`data/sample/medium_dataset` y escribe los resultados en `output/`.
+
+`make down` hace `stop -t 5` y `down`. Para ver los logs sin seguirlos: `make logs`.
 
 ## LengthMapper, AvgReducer, Q5Filter y Joiner (tareas 7 y 8)
 
@@ -47,3 +71,4 @@ Prueba manual con RabbitMQ (3 terminales):
     make demo-feed         # terminal 3: publica tokens, EOF y resultados Q1-Q4 simulados
 
 Resultado esperado: `Q5 n = [6, 8]` y `=> OK`. Variables de cada etapa: ver `main()` del módulo.
+
