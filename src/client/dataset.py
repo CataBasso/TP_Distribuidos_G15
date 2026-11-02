@@ -6,10 +6,9 @@ import pyarrow.parquet as pq
 COLUMNS = ["url", "name", "in_language", "date_modified", "abstract", "sections", "image"]
 DEFAULT_BATCH_ROWS = 200
 DEFAULT_BATCH_BYTES = 1 << 20 # 1MiB
-_READ_CHUNK = 1000 #filas que se leen del Parquet por vez
+_READ_CHUNK = 1000 
 
 
-#Todos los .parquet bajo data_dir, en orden estable (enwiki antes que frwiki)
 def parquet_files(data_dir) -> list[Path]:
     return sorted(Path(data_dir).rglob("*.parquet"))
 
@@ -30,7 +29,7 @@ def project(record: dict) -> dict:
         "name": record.get("name"),
         "lang": language.get("identifier"),
         "date_modified": _format_date(record.get("date_modified")),
-        "abstract": record.get("abstract"),     # None se conserva: el promedio ignora los nulos
+        "abstract": record.get("abstract"),
         "sections": record.get("sections"),
         "image_url": image.get("content_url"),
     }

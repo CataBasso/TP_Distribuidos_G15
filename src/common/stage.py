@@ -23,7 +23,6 @@ class EofCounter:
         self.expected = expected
         self._seen = {}
 
-    #Registra un EOF. True solo en el momento en que se completan los esperados
     def add(self, client_id, origin) -> bool:
         seen = self._seen.setdefault(tuple(client_id), set())
         before = len(seen)
@@ -33,11 +32,9 @@ class EofCounter:
     def complete(self, client_id) -> bool:
         return len(self._seen.get(tuple(client_id), ())) >= self.expected
 
-    #Olvida un cliente
     def forget(self, client_id) -> None:
         self._seen.pop(tuple(client_id), None)
 
-    #Olvida todo
     def clear(self) -> None:
         self._seen.clear()
 
@@ -65,7 +62,6 @@ class Stage:
     def listen_abort(self) -> None:
         self.bus.listen(None, self._on_abort_body, ABORT_EX, kind="fanout")
 
-    #Cada etapa libera el estado del cliente
     def _on_abort_body(self, body, ack, nack):
         try:
             message = decode(body)
@@ -79,7 +75,6 @@ class Stage:
         finally:
             ack()
 
-    #Decodifica, ignora abortados, hace ack al terminar y, si fn falla, descarta ese mensaje
     def handler(self, fn):
         def callback(body, ack, nack):
             try:

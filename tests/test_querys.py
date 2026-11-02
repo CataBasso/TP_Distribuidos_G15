@@ -1,23 +1,28 @@
 import csv
+import os
+import pytest
 from collections import Counter
 from pathlib import Path
 
 
-OUTPUT_DIR = Path("output")
-EXPECTED_DIR = Path("data/expected/medium")
+OUTPUT_ROOT = Path(os.environ.get("OUTPUT_ROOT", "output"))
+EXPECTED_DIR = Path(os.environ.get("EXPECTED_DIR", "data/expected/medium"))
 
 
-def read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open("r", encoding="utf-8", newline="") as file:
-        return list(csv.DictReader(file))
+def client_dirs() -> list[Path]:
+    dirs = sorted(p for p in OUTPUT_ROOT.glob("client_*") if p.is_dir())
+    assert dirs, f"No se encontraron carpetas client_* en {OUTPUT_ROOT}"
+    return dirs
+
 
 
 def compare_csv(
+    output_dir: Path,
     output_file: str,
     expected_file: str,
     check_order: bool = False,
 ) -> None:
-    output_path = OUTPUT_DIR / output_file
+    output_path = output_dir / output_file
     expected_path = EXPECTED_DIR / expected_file
 
     assert output_path.exists(), f"No existe el archivo de salida: {output_path}"
@@ -83,22 +88,21 @@ def compare_csv(
             + f"\nTotal de filas obtenidas: {len(output_rows)}"
         )
 
+@pytest.fixture(params=client_dirs() if OUTPUT_ROOT.exists() else [], ids=lambda p: p.name)
+def client_dir(request):
+    return request.param
 
-def test_query1():
-    compare_csv("output_query_1.csv", "query1.csv")
+def test_query1(client_dir):
+    compare_csv(client_dir, "output_query_1.csv", "query1.csv")
 
+def test_query2(client_dir):
+    compare_csv(client_dir, "output_query_2.csv", "query2.csv")
 
-def test_query2():
-    compare_csv("output_query_2.csv", "query2.csv")
+def test_query3(client_dir):
+    compare_csv(client_dir, "output_query_3.csv", "query3.csv")
 
+def test_query4(client_dir):
+    compare_csv(client_dir, "output_query_4.csv", "query4.csv", check_order=True)
 
-def test_query3():
-    compare_csv("output_query_3.csv", "query3.csv")
-
-
-def test_query4():
-    compare_csv("output_query_4.csv", "query4.csv", check_order=True)
-
-
-def test_query5():
-    compare_csv("output_query_5.csv", "query5.csv")
+def test_query5(client_dir):
+    compare_csv(client_dir, "output_query_5.csv", "query5.csv")

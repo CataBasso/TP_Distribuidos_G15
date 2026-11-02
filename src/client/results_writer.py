@@ -31,7 +31,7 @@ class ResultWriter:
             self._files[query] = f
             self._writers[query] = writer
 
-    #Escribe un mensaje 'result' del Gateway: {query, rows}
+
     def handle(self, message: dict) -> None:
         query = message["query"]
         if query not in CSV_HEADERS:

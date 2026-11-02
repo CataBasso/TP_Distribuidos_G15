@@ -7,16 +7,15 @@ class InMemoryBus:
     mismo InMemoryBus (así se prueba el flujo completo). drain() entrega todo lo pendiente."""
 
     def __init__(self):
-        self.queues = {}            # nombre -> deque de cuerpos
-        self.consumers = {}         # nombre -> [callback]
-        self._rr = {}               # nombre -> índice round-robin
-        self.bindings = {}          # exchange -> {"kind": str, "binds": [(queue, key)]}
+        self.queues = {}
+        self.consumers = {}
+        self._rr = {}
+        self.bindings = {}
         self._anon = count()
         self.acks = 0
         self.stopped = False
-        self.sent = []              # (exchange, key, body): todo lo publicado, para inspeccionar
+        self.sent = []
 
-    # --- declaración ---
     def declare(self, queue, exchange=None, keys=(), kind="direct"):
         self.queues.setdefault(queue, deque())
         if exchange:
@@ -32,7 +31,6 @@ class InMemoryBus:
         self.consumers.setdefault(queue, []).append(callback)
         return queue
 
-    # --- publicación ---
     def send(self, exchange, body, key=""):
         self.sent.append((exchange, key, body))
         if not exchange:
@@ -40,7 +38,7 @@ class InMemoryBus:
             return
         ex = self.bindings.get(exchange)
         if ex is None:
-            return                                  # exchange sin colas: se pierde, como RabbitMQ
+            return
         targets = []
         for queue, bound in ex["binds"]:
             if (ex["kind"] == "fanout" or bound == key) and queue not in targets:
@@ -48,7 +46,6 @@ class InMemoryBus:
         for queue in targets:
             self.queues[queue].append(body)
 
-    # --- consumo ---
     def drain(self, max_steps=1_000_000):
         """Entrega mensajes hasta que no quede ninguno con consumidor. Devuelve cuántos."""
         steps = 0
