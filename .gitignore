@@ -2,5 +2,8 @@
 __pycache__/
 *.pyc
 data/raw/
+data/sample/medium_dataset/
 output/
+logs/
+spool/
 *.zip

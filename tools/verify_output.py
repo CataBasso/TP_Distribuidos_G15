@@ -53,6 +53,11 @@ def main(argv=None):
             return 1
     bad = 0
     for c in clients:
+        if not any((Path(a.output) / c).glob("output_query_*.csv")):
+            print(f"[SIN SALIDA] {c}: no hay {a.output}/{c}/output_query_*.csv; el cliente no llegó a "
+                    "escribir nada (mirá `docker compose ps -a` y `docker compose logs rabbitmq`)")
+            bad += 1
+            continue
         rep = compare(Path(a.output) / c, a.expected)
         good = ok_report(rep)
         bad += not good
