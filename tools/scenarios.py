@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parent.parent
 KEYS = ("clients", "year", "q1", "q2", "img", "ac", "lm", "wm", "P", "A", "K")
 BASE = dict(clients=1, year=1, q1=1, q2=1, img=1, ac=1, lm=1, wm=1, P=1, A=1, K=1)
 
-# Escenarios fijos (equivalentes a los 1..5 de tp-coordinacion, adaptados a este sistema)
 SCENARIOS = {
     1: ("Un cliente, una réplica de cada etapa", {}),
     2: ("Múltiples clientes, una réplica de cada etapa", dict(clients=3)),

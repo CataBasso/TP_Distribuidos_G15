@@ -4,6 +4,9 @@ PYTEST := $(VENV)/bin/pytest
 QUERY_TEST_FILE = tests/test_querys.py
 MIDDLEWARE_TEST_FILE = tests/test_middleware.py
 PROTOCOL_TEST_FILE = tests/test_protocol.py
+SIZE ?= small
+N ?= 1
+export SIZE
 
 .PHONY: setup up down rabbit-up rabbit-down test test-unit test-integration logs
 
@@ -19,13 +22,14 @@ down:
 	docker compose -f docker-compose.yaml stop -t 5
 	docker compose -f docker-compose.yaml down
 
-test:
+test: switch
 	mkdir -p output
 	rm -rf ./output/*
 	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
 	docker logs --follow client_0
-	docker wait client_0
-	$(PYTEST) $(QUERY_TEST_FILE) -v; EXIT_CODE=$$?; \
+	docker wait $$(docker ps -a --filter "name=client_" --format '{{.Names}}')
+	EXPECTED_DIR=data/expected/$(SIZE) OUTPUT_ROOT=output \
+		$(PYTEST) $(QUERY_TEST_FILE) -v; EXIT_CODE=$$?; \
 	docker compose -f docker-compose.yaml stop -t 5; \
 	docker compose -f docker-compose.yaml down; \
 	exit $$EXIT_CODE
@@ -90,10 +94,10 @@ run-fake-system:
 # --- escenarios de réplicas (tools/scenarios.py): ver README, sección "Escenarios" ---
 .PHONY: scenarios switch test-scenario test-all-scenarios test-scenarios test-random
 
-scenarios:                 ## regenera scenarios/*.yaml (SIZE=small|medium, RANDOM=N, SEED=S)
-	python3 tools/scenarios.py generate --size $(or $(SIZE),small) --random $(or $(RANDOM_N),0) --seed $(or $(SEED),0)
+scenarios:
+	python3 tools/scenarios.py generate --size $(SIZE) --random $(or $(RANDOM_N),0) --seed $(or $(SEED),0)
 
-switch: scenarios          ## copia un escenario a docker-compose.yaml (make switch N=4, o interactivo)
+switch: scenarios
 	@python3 tools/scenarios.py list; \
 	n="$(N)"; if [ -z "$$n" ]; then read -p "Selecciona uno: " n; fi; \
 	python3 tools/scenarios.py switch $$n

@@ -7,7 +7,6 @@ from typing import Iterator
 
 class Spool:
 
-    #Wipe: borra datos de una corrida anterior
     def __init__(self, directory, max_open: int = 128, fsync: bool = False, wipe: bool = True):
         self.dir = Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
