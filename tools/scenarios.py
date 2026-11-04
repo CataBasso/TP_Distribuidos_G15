@@ -22,7 +22,7 @@ SCENARIOS = {
         dict(clients=3, year=2, q1=2, q2=2, img=2, ac=2, lm=3, wm=2, P=2, A=2, K=3)),
 }
 
-SIZES = {"small": ("small_dataset", "small"), "medium": ("medium_dataset", "medium")}
+SIZES = {"small": ("small_dataset", "small"), "medium": ("medium_dataset", "medium"), "large": ("large_dataset", "large")}
 
 
 def full(overrides):
