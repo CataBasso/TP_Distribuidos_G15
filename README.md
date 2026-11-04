@@ -50,27 +50,26 @@ las réplicas. Ctrl+C corta los logs pero **no** baja el sistema. `client_0` env
 
 `make down` hace `stop -t 5` y `down`. Para ver los logs sin seguirlos: `make logs`.
 
-## LengthMapper, AvgReducer, Q5Filter y Joiner (tareas 7 y 8)
+## LengthMapper, AvgReducer, Q5Filter y cierre de resultados (tareas 7 y 8)
 
 | Etapa | Módulo | Qué hace |
 |---|---|---|
-| LengthMapper | `text_processing/length_mapper.py` | cuenta palabras únicas; ≤2020 → promedio, ≥2021 → Q5 |
-| AvgReducer | `text_processing/avg_reducer.py` | promedio por cliente (partición `crc32(client_id) % A`) |
-| Q5Filter | `filters/q5_filter.py` | spool en disco; emite los artículos con n > promedio |
-| Joiner | `results/joiner.py` | cuenta EOF por consulta (1+1+P+1+K), reenvía al Gateway y manda `done` |
+| LengthMapper | `text_processing/length_mapper/length_mapper.py` | cuenta las palabras de cada artículo (con repeticiones); ≤2020 → suma y cantidad para el promedio, ≥2021 → Q5 |
+| AvgReducer | `text_processing/avg_reducer/avg_reducer.py` | promedio por cliente (partición `crc32(client_id) % A`) |
+| Q5Filter | `filters/q5_filter/q5_filter.py` | guarda en el spool los artículos que llegan antes del promedio; con el promedio conocido vacía el spool y filtra al vuelo; emite los de n > promedio |
+| Spool | `common/utils/spool.py` | un archivo CSV por cliente (`/spool/q5_<k>/client_<gw>_<n>.csv` dentro del contenedor) |
+| ResultTracker | `gateway/results_tracker.py` | el Gateway cuenta los EOF por consulta (1+1+P+1+K) y, al completarse, manda `done` al cliente |
+
+Ya no hay Joiner: las etapas finales publican en `results_ex` con clave `gw_id`, el Gateway
+consume `results_q.<gw_id>`, reenvía cada `result` al cliente y cuenta los EOF. Por eso el
+Gateway necesita `WORD_PARTITIONS` (P) y `Q5_PARTITIONS` (K) como variables de entorno.
 
 Nombres de colas/exchanges y formatos de mensaje: `src/common/topology.py`.
 
-Tests (sin broker): `make test-stages`.
+Tests (sin broker): `.venv/bin/pytest tests/test_length_avg_q5.py tests/test_spool.py tests/test_result_tracker.py tests/test_gateway.py`.
 
-Prueba manual con RabbitMQ (3 terminales):
-
-    make rabbit-up
-    make run-stages        # terminal 1: 2 LengthMapper, 2 AvgReducer, 2 Q5Filter, 1 Joiner
-    make demo-watch        # terminal 2: lee out_q.1 y verifica (espera hasta 30 s)
-    make demo-feed         # terminal 3: publica tokens, EOF y resultados Q1-Q4 simulados
-
-Resultado esperado: `Q5 n = [6, 8]` y `=> OK`. Variables de cada etapa: ver `main()` del módulo.
+Prueba manual de Client + Gateway con RabbitMQ real: `make run-fake-system` (hace de resto del
+sistema; levantar antes el Gateway, que declara `results_q.<gw_id>`).
 
 
 ## Escenarios de réplicas
@@ -81,6 +80,10 @@ salen los `docker-compose` de cada caso (`scenarios/N.yaml`) y las corridas sin 
 `LM_REPLICAS`, `WM_REPLICAS`, `AVG_PARTITIONS`, `Q5_PARTITIONS`, `WORD_PARTITIONS`) se calculan
 solas, así nunca quedan desincronizadas con las réplicas levantadas.
 
+La clave `gw` es la cantidad de Gateways: se levantan `gateway_0..gateway_<gw-1>` (con
+`GATEWAY_ID` 1..gw) y el cliente `c` se conecta a `gateway_<c % gw>`. Cada Gateway recibe los
+resultados de sus clientes por `results_q.<gw_id>` y cuenta sus EOF.
+
 | N | Caso |
 |---|------|
 | 1 | Un cliente, una réplica de cada etapa |
@@ -88,12 +91,13 @@ solas, así nunca quedan desincronizadas con las réplicas levantadas.
 | 3 | 3 clientes, filtros replicados (year, q1, q2, imágenes) |
 | 4 | 3 clientes, rama de longitud/Q5 replicada (ac, lm, A, K) |
 | 5 | 3 clientes, rama de palabras/Q3-Q4 replicada (ac, wm, P) |
-| 6 | 3 clientes, todo replicado |
+| 6 | 3 clientes, todo replicado (incluye 2 Gateways) |
+| 7 | 4 clientes repartidos en 2 Gateways (una réplica del resto) |
 | 100+ | aleatorios (`make scenarios RANDOM_N=5 SEED=3`) |
 
 Sin Docker (RabbitMQ falso, Wikimedia simulada):
 
-    make test-scenarios                    # los 6 fijos
+    make test-scenarios                    # todos los fijos (1..7)
     make test-random RANDOM_N=10 SEED=3    # aleatorios
 
 Con Docker (como `make switch` / `make test` de tp-coordinacion):

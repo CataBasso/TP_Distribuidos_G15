@@ -23,7 +23,7 @@ def read_expected(name):
 
 
 def fake_pipeline(broker, seen):
-    """Reemplaza a YearFilter...Joiner: guarda lo que recibe y contesta al EOF."""
+    """Reemplaza a YearFilter...Q5Filter: guarda lo que recibe y contesta al EOF."""
     q2_rows = read_expected("query2.csv")
     while True:
         msg = broker.get_year(timeout=20)
@@ -42,7 +42,7 @@ def fake_pipeline(broker, seen):
         chunks(4, [{"word": r["word"], "count": int(r["count"])} for r in read_expected("query4.csv")])
         chunks(5, [{"url": r["url"], "abstract_word_count": int(r["abstract_word_count"])}
                    for r in read_expected("query5.csv")])
-        broker.publish_result({"type": "done", "client_id": cid})
+        broker.finish(cid)                   # EOF de las cinco consultas: el Gateway manda 'done'
         return
 
 

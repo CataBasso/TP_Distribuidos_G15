@@ -1,22 +1,3 @@
-"""
-Reemplazos TEMPORALES de las etapas que todavía no están implementadas, para poder correr el
-sistema de punta a punta con las piezas reales (Client, Gateway, YearFilter, Q1, Q2,
-ImageGetter, LengthMapper, AvgReducer, Q5Filter, Joiner):
-
-  StandInCleaner    AbstractCleaner: lee norm_in (batches que deja el YearFilter) y publica en
-                    tok_ex un 'tokens' por artículo con sus palabras únicas, y reenvía el
-                    stage_eof con el total. La limpieza es una APROXIMACIÓN (minúsculas, solo
-                    letras, sin stopwords en/fr): no es la del AbstractCleaner real, así que
-                    los números de Q5 pueden diferir de data/expected/query5.csv.
-  StandInWordStage  WordMapper/WordReducer/TopMerger (Q3 y Q4): al ver el EOF de un cliente
-                    publica los resultados de data/expected/query3.csv y query4.csv y los EOF
-                    de esas consultas (P de Q3, 1 de Q4).
-
-Se reemplazan por las etapas reales cuando existan; nada más depende de ellos.
-
-    PYTHONPATH=src python -m devtools.stand_ins cleaner
-    PYTHONPATH=src WORD_PARTITIONS=1 python -m devtools.stand_ins words
-"""
 import csv
 import logging
 import re

@@ -1,22 +1,11 @@
-"""
-Resto del sistema FALSO, para probar a mano el Client y el Gateway con RabbitMQ real.
-
-Hace de YearFilter ... Joiner: lee year_in, cuenta los articles de cada cliente y, al recibir
-su EOF, publica en out_q.<gw_id> los resultados esperados (data/expected/*.csv) y 'done'.
-
-    PYTHONPATH=src python tools/fake_system.py --gw-id 1 --rabbit-host localhost
-
-No hace ningún cálculo: sirve solo para ver que lo que entra por year_in y lo que vuelve por
-out_q.<gw_id> llega bien de punta a punta.
-"""
 import argparse
 import csv
 import logging
 from collections import Counter
 from pathlib import Path
 
-from common.middleware import MessageMiddlewareQueueRabbitMQ
-from common.protocol import decode, done_message, encode, result_message
+from common.middleware import MessageMiddlewareExchangeRabbitMQ, MessageMiddlewareQueueRabbitMQ
+from common.protocol import decode, encode, eof_message, result_message
 
 CHUNK = 100
 log = logging.getLogger("fake_system")
@@ -28,7 +17,7 @@ def expected(expected_dir, name):
 
 
 def results_for(expected_dir):
-    """(query, filas) tal como las entrega el Joiner."""
+    """(query, filas) tal como las entregan las etapas finales."""
     q2 = [{"name": r["name"], "url": r["url"], "image": r["url"].encode()}
           for r in expected(expected_dir, "query2.csv")]
     return [
@@ -46,13 +35,15 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--gw-id", type=int, default=1)
     p.add_argument("--rabbit-host", default="localhost")
-    p.add_argument("--expected-dir", default="data/expected")
+    p.add_argument("--expected-dir", default="data/expected/small")
     p.add_argument("--year-queue", default="year_in")
     args = p.parse_args()
     logging.basicConfig(level="INFO", format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     year = MessageMiddlewareQueueRabbitMQ(args.rabbit_host, args.year_queue)
-    out = MessageMiddlewareQueueRabbitMQ(args.rabbit_host, f"out_q.{args.gw_id}")
+    out = MessageMiddlewareExchangeRabbitMQ(args.rabbit_host, "results_ex", [],
+                                            exchange_type="direct")
+    gw_key = str(args.gw_id)
     articles = Counter()
 
     def on_year(body, ack, nack):
@@ -64,9 +55,10 @@ def main():
             log.info("cliente %s: %d articles y EOF; publico resultados", cid, articles[cid])
             for query, rows in results_for(args.expected_dir):
                 for i in range(0, max(len(rows), 1), CHUNK):
-                    out.send(encode(result_message(cid, query, rows[i:i + CHUNK])))
-            out.send(encode(done_message(cid)))
-            log.info("cliente %s: resultados y done publicados", cid)
+                    out.send(encode(result_message(cid, query, rows[i:i + CHUNK])), gw_key)
+                eof = eof_message(cid, origin=0, query=query)
+                out.send(encode(eof), gw_key)           # el Gateway espera 1 EOF por consulta
+            log.info("cliente %s: resultados y EOF publicados", cid)
             articles.pop(cid, None)
         ack()
 

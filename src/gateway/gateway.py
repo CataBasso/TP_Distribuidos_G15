@@ -11,16 +11,19 @@ from common.protocol import (
 )
 from common.protocol import batch_message, eof_message
 from common.protocol.internal import serialize, serialize_abort
+from common.topology import expected_result_eofs
+from .results_tracker import ResultTracker
 from .session import ClientSession
 
-# decode()/recv_frame() devuelven el tipo como nombre ("batch"); las constantes son códigos.
 _BATCH, _EOF, _RESULT, _DONE = (TYPE_NAMES[t] for t in (BATCH, EOF, RESULT, DONE))
 
 
 class Gateway:
-    def __init__(self, gw_id: int, broker, host: str = "0.0.0.0", port: int = 5000):
+    def __init__(self, gw_id: int, broker, host: str = "0.0.0.0", port: int = 5000,
+                 expected_eofs: dict = None):
         self.gw_id = gw_id
         self.broker = broker
+        self.tracker = ResultTracker(expected_eofs or expected_result_eofs(1, 1))
         self.host, self.port = host, port
         self._server = None
         self._sessions: dict[int, ClientSession] = {}
@@ -29,19 +32,26 @@ class Gateway:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
 
-    # ------------------------------------------------------------------ ciclo de vida
     def start(self) -> int:
         """Empieza a escuchar y devuelve el puerto real (útil con port=0). No bloquea."""
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server.bind((self.host, self.port))
         self._server.listen(64)
-        self._server.settimeout(0.5)            # para poder revisar self._stop
+        self._server.settimeout(0.5)            
         self.port = self._server.getsockname()[1]
-        for target, name in ((self._accept_loop, "accept"), (self._results_loop, "results")):
-            t = threading.Thread(target=target, name=f"gw{self.gw_id}-{name}", daemon=True)
-            t.start()
-            self._threads.append(t)
+       
+        results = threading.Thread(target=self._results_loop, name=f"gw{self.gw_id}-results",
+                                   daemon=True)
+        results.start()
+        self._threads.append(results)
+        ready = getattr(self.broker, "results_ready", None)
+        if ready is not None and not ready.wait(timeout=30):
+            logger.warning("results_queue_not_ready", LogResult.fail, "gw_id", self.gw_id)
+        accept = threading.Thread(target=self._accept_loop, name=f"gw{self.gw_id}-accept",
+                                  daemon=True)
+        accept.start()
+        self._threads.append(accept)
         logger.info("gateway_started", LogResult.success, "gw_id", self.gw_id, "host", self.host, "port", self.port)
         return self.port
 
@@ -54,8 +64,6 @@ class Gateway:
         self.stop()
 
     def stop(self) -> None:
-        """Apagado ordenado (SIGTERM): deja de aceptar, corta el consumo de resultados y
-        cierra las sesiones; cada hilo de cliente publica el abort de lo que quedó a medias."""
         if self._stop.is_set() and self._server is None:
             return
         self._stop.set()
@@ -79,7 +87,6 @@ class Gateway:
             self._server = None
         logger.info("gateway_stopped", LogResult.success, "gw_id", self.gw_id)
 
-    # ------------------------------------------------------------------ clientes
     def _accept_loop(self):
         while not self._stop.is_set():
             try:
@@ -115,7 +122,7 @@ class Gateway:
             batch_id = 0
             while True:
                 message = recv_frame(conn)
-                if message is None:                       # el cliente cerró
+                if message is None:                      
                     break
                 kind = message.get("type")
                 if kind == _BATCH:
@@ -123,7 +130,6 @@ class Gateway:
                         batch_message(cid, batch_id, message["rows"], origin=self.gw_id)))
                     batch_id += 1
                 elif kind == _EOF and not session.eof_sent:
-                    # total = cantidad de batches: cada etapa lo usa para saber cuándo vio todo
                     publisher.send_year(serialize(
                         eof_message(cid, origin=self.gw_id, total=batch_id)))
                     session.eof_sent = True
@@ -133,7 +139,6 @@ class Gateway:
                                                cid))
                     break
         except FrameError as e:
-            # mensaje que viola el protocolo (campos de más, tipo desconocido, truncado...)
             logger.warning("invalid_client_message", LogResult.fail, "client_id", cid, "reason", e)
             try:
                 session.send(error_message("invalid_message", str(e), cid))
@@ -155,6 +160,7 @@ class Gateway:
         finally:
             if not session.done:
                 self._abort(session, publisher)
+            self.tracker.forget(cid)
             self._unregister(session)
             session.close()
             if publisher is not None:
@@ -169,7 +175,6 @@ class Gateway:
                     )
 
     def _abort(self, session: ClientSession, publisher) -> None:
-        """El cliente se fue (o el Gateway se apaga) sin haber recibido sus resultados."""
         logger.warning("client_aborted", LogResult.fail, "client_id", session.client_id)
         try:
             if publisher is None:
@@ -188,7 +193,6 @@ class Gateway:
                 "error", e,
             )
 
-    # ------------------------------------------------------------------ resultados
     def _results_loop(self):
         try:
             self.broker.run_results(self._on_result)
@@ -203,7 +207,6 @@ class Gateway:
                 self._stop.set()
 
     def _on_result(self, body: bytes, ack, nack):
-        """Reenvía un mensaje de out_q.<gw_id> (result o done) al cliente dueño."""
         try:
             message = decode(body)
             gw_id, n = message["client_id"]
@@ -212,7 +215,7 @@ class Gateway:
                 "invalid_result_message",
                 LogResult.fail,
                 "gw_id", self.gw_id,
-                "reason", "mensaje ilegible en out_q",
+                "reason", "mensaje ilegible en results_q",
             )
             ack()
             return
@@ -239,11 +242,20 @@ class Gateway:
             kind = message["type"]
             if kind == _RESULT:
                 session.send(result_message(session.client_id, message["query"], message["rows"]))
-            elif kind == _DONE:
-                session.send(done_message(session.client_id))
-                session.done = True
-                session.close()                 # el hilo del cliente termina sin abort
-                logger.info("client_results_completed", LogResult.success, "client_id", session.client_id)
+            elif kind == _EOF:
+                try:
+                    complete = self.tracker.add(session.client_id, message.get("query"),
+                                                message.get("origin", 0))
+                except ValueError as e:
+                    logger.warning("invalid_result_eof", LogResult.fail,
+                                   "client_id", session.client_id, "reason", e)
+                    complete = False
+                if complete:
+                    session.send(done_message(session.client_id))
+                    session.done = True
+                    session.close()           
+                    logger.info("client_results_completed", LogResult.success,
+                                "client_id", session.client_id)
             else:
                 logger.error(
                     "unknown_result_type",

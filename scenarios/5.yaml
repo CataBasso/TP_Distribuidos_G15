@@ -1,4 +1,4 @@
-# Generado por tools/scenarios.py -- clients=3 year=1 q1=1 q2=1 img=1 ac=2 lm=1 wm=2 P=2 A=1 K=1
+# Generado por tools/scenarios.py -- clients=3 gw=1 year=1 q1=1 q2=1 img=1 ac=2 lm=1 wm=2 P=2 A=1 K=1
 services:
   rabbitmq:
     build:
@@ -16,11 +16,11 @@ services:
     ports:
     - 5672:5672
     - 15672:15672
-  gateway:
+  gateway_0:
     build:
       context: ./src/
       dockerfile: gateway/Dockerfile
-    container_name: gateway
+    container_name: gateway_0
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -28,18 +28,6 @@ services:
     - GATEWAY_ID=1
     - GATEWAY_PORT=5000
     - RABBIT_HOST=rabbitmq
-    - PYTHONUNBUFFERED=1
-  joiner:
-    build:
-      context: ./src/
-      dockerfile: results/Dockerfile
-    container_name: joiner
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-    - GW_ID=1
-    - MOM_HOST=rabbitmq
     - WORD_PARTITIONS=2
     - Q5_PARTITIONS=1
     - PYTHONUNBUFFERED=1
@@ -239,8 +227,7 @@ services:
       dockerfile: client/Dockerfile
     container_name: client_0
     depends_on:
-    - gateway
-    - joiner
+    - gateway_0
     - year_filter_0
     - q1_filter_0
     - q2_filter_0
@@ -256,13 +243,13 @@ services:
     - word_reducer_1
     - top_merger
     environment:
-    - GATEWAY_HOST=gateway
+    - GATEWAY_HOST=gateway_0
     - GATEWAY_PORT=5000
     - DATA_DIR=/data
     - OUTPUT_DIR=/output/client_0
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/medium_dataset:/data:ro
+    - ./data/sample/small_dataset:/data:ro
     - ./output:/output
   client_1:
     build:
@@ -270,8 +257,7 @@ services:
       dockerfile: client/Dockerfile
     container_name: client_1
     depends_on:
-    - gateway
-    - joiner
+    - gateway_0
     - year_filter_0
     - q1_filter_0
     - q2_filter_0
@@ -287,13 +273,13 @@ services:
     - word_reducer_1
     - top_merger
     environment:
-    - GATEWAY_HOST=gateway
+    - GATEWAY_HOST=gateway_0
     - GATEWAY_PORT=5000
     - DATA_DIR=/data
     - OUTPUT_DIR=/output/client_1
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/medium_dataset:/data:ro
+    - ./data/sample/small_dataset:/data:ro
     - ./output:/output
   client_2:
     build:
@@ -301,8 +287,7 @@ services:
       dockerfile: client/Dockerfile
     container_name: client_2
     depends_on:
-    - gateway
-    - joiner
+    - gateway_0
     - year_filter_0
     - q1_filter_0
     - q2_filter_0
@@ -318,11 +303,11 @@ services:
     - word_reducer_1
     - top_merger
     environment:
-    - GATEWAY_HOST=gateway
+    - GATEWAY_HOST=gateway_0
     - GATEWAY_PORT=5000
     - DATA_DIR=/data
     - OUTPUT_DIR=/output/client_2
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/medium_dataset:/data:ro
+    - ./data/sample/small_dataset:/data:ro
     - ./output:/output

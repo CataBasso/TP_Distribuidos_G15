@@ -112,8 +112,8 @@ test-scenario:             ## con Docker: levanta docker-compose.yaml, espera a 
 	docker compose -f docker-compose.yaml stop -t 5; docker compose -f docker-compose.yaml down -v; \
 	exit $$EXIT_CODE
 
-test-all-scenarios:        ## con Docker: los 6 escenarios, uno tras otro (SIZE=small|medium)
-	@fail=0; for n in 1 2 3 4 5 6; do \
+test-all-scenarios:        ## con Docker: todos los escenarios fijos (python3 tools/scenarios.py ids), uno tras otro (SIZE=small|medium)
+	@fail=0; for n in $$(python3 tools/scenarios.py ids); do \
 	  echo "=== escenario $$n ($(or $(SIZE),small)) ==="; \
 	  python3 tools/scenarios.py generate --size $(or $(SIZE),small) > /dev/null; \
 	  python3 tools/scenarios.py switch $$n; \

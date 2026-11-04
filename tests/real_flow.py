@@ -1,13 +1,3 @@
-"""
-Corre todo el sistema real en un solo proceso, sin Docker: Client(s), Gateway, YearFilter, Q1, Q2,
-ImageGetter (Wikimedia simulada), AbstractCleaner, LengthMapper, AvgReducer, Q5Filter,
-WordMapper, WordReducer, TopMerger y Joiner, sobre un RabbitMQ falso (tests/fake_rabbit.py).
-La cantidad de réplicass sale de un escenario de tools/scenarios.py (los mismos que generan los
-docker-compose), así que una corrida en memoria prueba la misma topología que el compose.
-
-    PYTHONPATH=src:tests:tools python tests/real_flow.py [escenario ...] [--random N --seed S]
-        (sin argumentos corre todos los escenarios fijos)
-"""
 import logging
 import os
 import shutil
@@ -47,7 +37,6 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
     import importlib
 
     def load(module, input_queue=None, output_queue=None):
-        # Los componentes reales leen INPUT_QUEUE/OUTPUT_QUEUE al IMPORTARSE (como en su contenedor)
         if input_queue:
             os.environ["INPUT_QUEUE"] = input_queue
         if output_queue:
@@ -61,7 +50,7 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
     ig = load("image.image_getter", "img_in")
     ac = load("text_processing.abstract_cleaner.abstract_cleaner", "norm_in")
     from filters.q5_filter.q5_filter import Q5Filter
-    from results.joiner import Joiner
+    from common.topology import expected_result_eofs
     from text_processing.avg_reducer.avg_reducer import AvgReducer
     from text_processing.length_mapper.length_mapper import LengthMapper
     from text_processing.top_merger.top_merger import TopMerger
@@ -90,8 +79,6 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
 
     bus = lambda: RabbitBus("fake")
     AC, LM, WM, P, A, K = s["ac"], s["lm"], s["wm"], s["P"], s["A"], s["K"]
-    # Primero el final de la cadena: así cada cola existe antes de que se publique en ella.
-    mine(Joiner(bus(), 1, P, K))
     for k in range(K):
         mine(Q5Filter(bus(), k, LM, spool / f"q5_{k}"))
     for a in range(A):
@@ -114,14 +101,15 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
     for i in range(s["year"]):
         real(yf, "YearFilter", i)
 
-    gateway = Gateway(1, RabbitGatewayBroker("fake", 1), "127.0.0.1", 0)
-    port = gateway.start()
+    gateways = [Gateway(g + 1, RabbitGatewayBroker("fake", g + 1), "127.0.0.1", 0,
+                        expected_eofs=expected_result_eofs(P, K)) for g in range(s["gw"])]
+    ports = [gw.start() for gw in gateways]
     t0 = time.time()
     errors = []
 
     def run_client(c):
         try:
-            Client("127.0.0.1", port, data_dir, str(output_dir / f"client_{c}"), 100, 10_000_000).run()
+            Client("127.0.0.1", ports[c % len(ports)], data_dir, str(output_dir / f"client_{c}"), 100, 10_000_000).run()
         except Exception as e:                  # noqa: BLE001
             errors.append(f"client_{c}: {e}")
 
@@ -132,7 +120,8 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
         t.join(max(0.1, timeout - (time.time() - t0)))
     finished = not any(t.is_alive() for t in cts) and not errors
     elapsed = time.time() - t0
-    gateway.stop()
+    for gw in gateways:
+        gw.stop()
     for stop in stops:
         try:
             stop()

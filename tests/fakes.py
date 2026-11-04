@@ -7,13 +7,12 @@ from common.protocol import decode, encode
 
 class InMemoryBroker:
     def __init__(self):
-        self.year_in = queue.Queue()        # cuerpos publicados en year_in
-        self.aborts = queue.Queue()         # cuerpos publicados en abort_ex
-        self.out_q = queue.Queue()          # cuerpos que el Joiner "publica" en out_q.<g>
+        self.year_in = queue.Queue()        
+        self.aborts = queue.Queue()         
+        self.results_q = queue.Queue()      
         self.acked = 0
         self._stop = threading.Event()
 
-    # --- lado del Gateway ---
     def open_publisher(self):
         return _Publisher(self)
 
@@ -22,7 +21,7 @@ class InMemoryBroker:
             self.acked += 1
         while not self._stop.is_set():
             try:
-                body = self.out_q.get(timeout=0.05)
+                body = self.results_q.get(timeout=0.05)
             except queue.Empty:
                 continue
             on_message(body, ack, lambda requeue=True: None)
@@ -30,9 +29,16 @@ class InMemoryBroker:
     def stop_results(self):
         self._stop.set()
 
-    # --- lado de las etapas falsas ---
     def publish_result(self, message: dict):
-        self.out_q.put(encode(message))
+        self.results_q.put(encode(message))
+
+    def finish(self, client_id, expected=None, skip=()):
+        expected = expected or {1: 1, 2: 1, 3: 1, 4: 1, 5: 1}
+        for query, count in expected.items():
+            for origin in range(count):
+                if (query, origin) not in skip:
+                    self.publish_result({"type": "eof", "client_id": client_id,
+                                         "origin": origin, "query": query})
 
     def get_year(self, timeout=5) -> dict:
         return decode(self.year_in.get(timeout=timeout))
@@ -56,12 +62,11 @@ class _Publisher:
         self.closed = True
 
 
-# --- helpers para probar las etapas con InMemoryBus (tareas 7 y 8) ---
-from common.bus import InMemoryBus  # noqa: E402
-from common.protocol.messages import (  # noqa: E402
+from common.bus import InMemoryBus  
+from common.protocol.messages import ( 
     abort_message, eof_message, result_message, tokens_message,
 )
-from common.topology import RESULTS_EX, TOK_EX, OUT_Q, queue_of  # noqa: E402
+from common.topology import RESULTS_EX, TOK_EX, queue_of 
 
 
 def tokens(client_id, url, words, period, batch_id=0, origin=0):
@@ -78,8 +83,3 @@ def query_eof(client_id, query, origin=0):
     m = eof_message(client_id, origin=origin)
     m["query"] = query
     return encode(m)
-
-
-def out_messages(bus, gw_id):
-    """Todo lo que el Joiner del Gateway gw_id publicó en out_q.<gw_id>, decodificado."""
-    return [decode(b) for b in bus.bodies("", queue_of(OUT_Q, gw_id))]
