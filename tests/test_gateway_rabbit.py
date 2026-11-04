@@ -6,10 +6,12 @@ import uuid
 import pytest
 
 from common.middleware import (
-    RabbitConnection, MessageMiddlewareQueueRabbitMQ, MessageMiddlewareDisconnectedError,
+    RabbitConnection, MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ,
+    MessageMiddlewareDisconnectedError,
 )
-from common.protocol import send_frame, recv_frame, encode, decode, result_message, done_message
-from gateway.broker import RabbitGatewayBroker, out_queue_name
+from common.protocol import send_frame, recv_frame, encode, decode, result_message, eof_message
+from common.topology import expected_result_eofs
+from gateway.broker import RabbitGatewayBroker, results_queue_name
 from gateway.gateway import Gateway
 
 HOST = os.environ.get("RABBIT_HOST", "localhost")
@@ -26,30 +28,38 @@ def broker_available():
 pytestmark = pytest.mark.skipif(not broker_available(), reason=f"no hay RabbitMQ en {HOST}")
 
 
-def test_batch_goes_through_year_in_and_result_comes_back_through_out_q():
+def test_batch_goes_through_year_in_and_result_comes_back_through_results_q():
     uid = uuid.uuid4().hex[:8]
     gw_id = 5000 + int(uid[:3], 16) % 4000
-    year_q, abort_ex = f"year_in_{uid}", f"abort_ex_{uid}"
-    broker = RabbitGatewayBroker(HOST, gw_id, year_q, abort_ex, durable=False)
-    gateway = Gateway(gw_id, broker, "127.0.0.1", 0)
-    port = gateway.start()
+    year_q, abort_ex, results_ex = f"year_in_{uid}", f"abort_ex_{uid}", f"results_ex_{uid}"
+    results_q = f"results_q_{uid}"
+    broker = RabbitGatewayBroker(HOST, gw_id, year_q, abort_ex, durable=False,
+                                 results_exchange=results_ex, results_queue=results_q)
+    gateway = Gateway(gw_id, broker, "127.0.0.1", 0, expected_eofs=expected_result_eofs(1, 1))
+    port = gateway.start()      # espera a que results_q exista antes de aceptar clientes
     received = []
 
     def system():
         year = MessageMiddlewareQueueRabbitMQ(HOST, year_q, durable=False)
-        out = MessageMiddlewareQueueRabbitMQ(HOST, out_queue_name(gw_id), durable=False)
+        out = MessageMiddlewareExchangeRabbitMQ(HOST, results_ex, [], exchange_type="direct",
+                                                durable=False)
+
+        def publish(message):
+            out.send(encode(message), routing_key=str(gw_id))
 
         def on_message(body, ack, nack):
             msg = decode(body)
             received.append(msg)
             if msg["type"] == "eof":
-                out.send(encode(result_message(msg["client_id"], 3, [{"word": "ada"}])))
-                out.send(encode(done_message(msg["client_id"])))
+                cid = msg["client_id"]
+                publish(result_message(cid, 3, [{"word": "ada"}]))
+                for query in (1, 2, 3, 4, 5):          # un EOF por consulta: el Gateway da el 'done'
+                    publish(eof_message(cid, origin=0, query=query))
                 year.stop_consuming()
             ack()
 
         year.start_consuming(on_message)
-        year.delete(); year.close(); out.close()
+        year.delete(); year.close(); out.delete(); out.close()
 
     t = threading.Thread(target=system, daemon=True); t.start()
     try:
@@ -65,5 +75,5 @@ def test_batch_goes_through_year_in_and_result_comes_back_through_out_q():
         assert [m["type"] for m in received] == ["batch", "eof"]
     finally:
         gateway.stop()
-        leftover = MessageMiddlewareQueueRabbitMQ(HOST, out_queue_name(gw_id), durable=False)
+        leftover = MessageMiddlewareQueueRabbitMQ(HOST, results_q, durable=False)
         leftover.delete(); leftover.close()

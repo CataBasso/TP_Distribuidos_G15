@@ -1,7 +1,7 @@
 from common.middleware import partition
 
 #Nombres de colas y exchanges, y convenciones de mensajes, compartidos por las etapas
-#LengthMapper, AvgReducer, Q5Filter y Joiner
+#LengthMapper, AvgReducer, Q5Filter y el Gateway
 ABORT_EX = "abort_ex"   #Gateway -> todas las etapas con estado por cliente
 TOK_EX = "tok_ex"   #AbstractCleaner -> {WordMapper, LengthMapper}
 LM_IN = "lm_in" #Cola de LengthMapper
@@ -17,9 +17,8 @@ AVG_EX = "avg_ex"   #AvgReducer -> todos los Q5Filter (avg_ready)
 AVG_READY_Q = "avg_ready_q" #Cola de cada Q5Filter[k]
 Q5_PEX = "q5_pex"   #LengthMapper -> Q5Filter (hash por K)
 Q5_IN = "q5_in" #Una cola por particion de Q5
-RESULTS_EX = "results_ex"   #Todos los productores de resultados -> Joiner (clave=gw_id)
-RESULTS_Q = "results_q" #Cola del Joiner del Gateway
-OUT_Q = "out_q" #Joiner[g] -> Gateway g
+RESULTS_EX = "results_ex"   #Todos los productores de resultados -> Gateway (clave=gw_id)
+RESULTS_Q = "results_q" #Cola results_q.<g>: la consume el Gateway g
 
 EXCHANGE_KINDS = {TOK_EX: "fanout", LM_CTRL: "fanout", WM_CTRL: "fanout", AVG_EX: "fanout", ABORT_EX: "fanout"}
 
@@ -52,7 +51,7 @@ def client_key(client_id) -> str:
 def results_key(client_id) -> str:
     return str(client_id[0])
 
-#EOF que el Joiner espera por consulta: 1 para Q1, Q2 y Q4; P para Q3; K para Q5.
+#EOF que el Gateway espera por consulta para dar por completo a un cliente: 1 para Q1, Q2 y Q4; P para Q3; K para Q5.
 def expected_result_eofs(word_partitions: int, q5_partitions: int) -> dict:
     return {1: 1, 2: 1, 3: word_partitions, 4: 1, 5: q5_partitions}
 

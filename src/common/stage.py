@@ -1,14 +1,3 @@
-"""
-Base común de las etapas con estado por cliente (LengthMapper, AvgReducer, Q5Filter, Joiner).
-
-Qué resuelve:
-  * decodificar los mensajes (uno inválido se descarta con un log, no tira la etapa),
-  * escuchar abort_ex y avisar a la etapa para que libere el estado del cliente,
-  * ignorar los mensajes tardíos de un cliente abortado,
-  * contar EOF por cliente (EofCounter).
-
-Cada subclase implementa on_abort(client_id) y registra sus colas en start().
-"""
 import logging
 
 from common.protocol import decode
@@ -16,7 +5,6 @@ from common.topology import ABORT_EX
 
 log = logging.getLogger(__name__)
 
-#Cuenta, por cliente, de cuantos orígenes distintos llego un EOF
 class EofCounter:
 
     def __init__(self, expected: int):

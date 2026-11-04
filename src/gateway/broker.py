@@ -1,13 +1,16 @@
+import threading
+
 from common.middleware import (
     RabbitConnection, MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ,
 )
 
 YEAR_QUEUE = "year_in"
 ABORT_EXCHANGE = "abort_ex"
+RESULTS_EXCHANGE = "results_ex"      
 
 
-def out_queue_name(gw_id: int) -> str:
-    return f"out_q.{gw_id}"
+def results_queue_name(gw_id: int) -> str:
+    return f"results_q.{gw_id}"
 
 
 class _RabbitPublisher:
@@ -31,11 +34,14 @@ class _RabbitPublisher:
 
 class RabbitGatewayBroker:
     def __init__(self, host, gw_id, year_queue=YEAR_QUEUE, abort_exchange=ABORT_EXCHANGE,
-                 durable=True):
+                 durable=True, results_exchange=RESULTS_EXCHANGE, results_queue=None):
         self.host, self.gw_id = host, gw_id
         self.year_queue, self.abort_exchange, self.durable = year_queue, abort_exchange, durable
+        self.results_exchange = results_exchange
+        self.results_queue = results_queue or results_queue_name(gw_id)
         self._results_rc = None
         self._stopped = False
+        self.results_ready = threading.Event()
 
     def open_publisher(self):
         return _RabbitPublisher(self.host, self.year_queue, self.abort_exchange, self.durable)
@@ -44,10 +50,12 @@ class RabbitGatewayBroker:
         if self._stopped:
             return
         self._results_rc = RabbitConnection(self.host)
-        out_q = MessageMiddlewareQueueRabbitMQ(self.host, out_queue_name(self.gw_id),
-                                               connection=self._results_rc, durable=self.durable)
+        results = MessageMiddlewareExchangeRabbitMQ(
+            self.host, self.results_exchange, [str(self.gw_id)], exchange_type="direct",
+            queue_name=self.results_queue, durable=self.durable, connection=self._results_rc)
         try:
-            out_q.consume(on_message)
+            results.consume(on_message)
+            self.results_ready.set()
             self._results_rc.run()
         finally:
             self._results_rc.close()

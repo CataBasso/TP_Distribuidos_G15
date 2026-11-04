@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-KEYS = ("clients", "year", "q1", "q2", "img", "ac", "lm", "wm", "P", "A", "K")
-BASE = dict(clients=1, year=1, q1=1, q2=1, img=1, ac=1, lm=1, wm=1, P=1, A=1, K=1)
+KEYS = ("clients", "gw", "year", "q1", "q2", "img", "ac", "lm", "wm", "P", "A", "K")
+BASE = dict(clients=1, gw=1, year=1, q1=1, q2=1, img=1, ac=1, lm=1, wm=1, P=1, A=1, K=1)
 
 SCENARIOS = {
     1: ("Un cliente, una réplica de cada etapa", {}),
@@ -18,8 +18,10 @@ SCENARIOS = {
         dict(clients=3, ac=2, lm=2, A=2, K=2)),
     5: ("Múltiples clientes, rama de palabras/Q3-Q4 replicada (ac, wm, P)",
         dict(clients=3, ac=2, wm=2, P=2)),
-    6: ("Múltiples clientes, todo replicado",
-        dict(clients=3, year=2, q1=2, q2=2, img=2, ac=2, lm=3, wm=2, P=2, A=2, K=3)),
+    6: ("Múltiples clientes, todo replicado (incluye 2 Gateways)",
+        dict(clients=3, gw=2, year=2, q1=2, q2=2, img=2, ac=2, lm=3, wm=2, P=2, A=2, K=3)),
+    7: ("Múltiples clientes repartidos en varios Gateways (una réplica del resto)",
+        dict(clients=4, gw=2)),
 }
 
 SIZES = {"small": ("small_dataset", "small"), "medium": ("medium_dataset", "medium"), "large": ("large_dataset", "large")}
@@ -33,7 +35,7 @@ def full(overrides):
 
 def random_scenario(rng, max_replicas=3):
     s = {k: rng.randint(1, max_replicas) for k in KEYS if k != "clients"}
-    s["clients"] = rng.randint(1, 3)
+    s["clients"] = rng.randint(1, 4)
     return s
 
 
@@ -41,7 +43,6 @@ def describe(s):
     return " ".join(f"{k}={s[k]}" for k in KEYS)
 
 
-# --------------------------------------------------------------------------- compose
 def _svc(name, dockerfile, env, depends=None, context="./src/", volumes=(), ports=(),
          healthcheck=None):
     lines = [f"  {name}:", "    build:", f"      context: {context}",
@@ -74,13 +75,14 @@ def compose(s, size="small"):
                         "      start_period: 50s",
                         "      test: rabbitmq-diagnostics check_port_connectivity",
                         "      timeout: 3s"]))
-    out.append(_svc("gateway", "gateway/Dockerfile",
-                    ["GATEWAY_ID=1", "GATEWAY_PORT=5000", "RABBIT_HOST=rabbitmq", py], "rabbit"))
-    out.append(_svc("joiner", "results/Dockerfile",
-                    ["GW_ID=1", mom, f"WORD_PARTITIONS={s['P']}", f"Q5_PARTITIONS={s['K']}", py],
-                    "rabbit"))
-
-    stage_names = ["gateway", "joiner"]
+ 
+    stage_names = []
+    for g in range(s["gw"]):
+        name = f"gateway_{g}"
+        stage_names.append(name)
+        out.append(_svc(name, "gateway/Dockerfile",
+                        [f"GATEWAY_ID={g + 1}", "GATEWAY_PORT=5000", "RABBIT_HOST=rabbitmq",
+                         f"WORD_PARTITIONS={s['P']}", f"Q5_PARTITIONS={s['K']}", py], "rabbit"))
 
     def replicas(prefix, count, dockerfile, env_of):
         for i in range(count):
@@ -111,7 +113,7 @@ def compose(s, size="small"):
 
     for c in range(s["clients"]):
         out.append(_svc(f"client_{c}", "client/Dockerfile",
-                        ["GATEWAY_HOST=gateway", "GATEWAY_PORT=5000", "DATA_DIR=/data",
+                        [f"GATEWAY_HOST=gateway_{c % s['gw']}", "GATEWAY_PORT=5000", "DATA_DIR=/data",
                          f"OUTPUT_DIR=/output/client_{c}", py], stage_names,
                         volumes=[f"./data/sample/{dataset}:/data:ro", "./output:/output"]))
     header = f"# Generado por tools/scenarios.py -- {describe(s)}\n"
@@ -136,6 +138,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
+    sub.add_parser("ids", help="números de los escenarios fijos, separados por espacios")
     g = sub.add_parser("generate")
     g.add_argument("--size", choices=list(SIZES), default="small")
     g.add_argument("--random", type=int, default=0, help="cantidad de escenarios aleatorios extra")
@@ -143,7 +146,9 @@ def main(argv=None):
     sw = sub.add_parser("switch")
     sw.add_argument("n", type=int)
     a = p.parse_args(argv)
-    if a.cmd == "list":
+    if a.cmd == "ids":
+        print(" ".join(str(n) for n in SCENARIOS))
+    elif a.cmd == "list":
         for n, (desc, over) in SCENARIOS.items():
             print(f"{n}) {desc}\n     {describe(full(over))}")
     elif a.cmd == "generate":

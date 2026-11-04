@@ -1,4 +1,4 @@
-import json
+import csv
 import os
 from collections import OrderedDict
 from pathlib import Path
@@ -12,53 +12,51 @@ class Spool:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.max_open = max_open
         self.fsync = fsync
-        self._open: "OrderedDict[tuple, object]" = OrderedDict()
+        self._open: "OrderedDict[tuple, tuple]" = OrderedDict()    
         if wipe:
-            for path in self.dir.glob("client_*.jsonl"):
-                path.unlink()
+            for pattern in ("client_*.csv", "client_*.jsonl"):     
+                for path in self.dir.glob(pattern):
+                    path.unlink()
 
-    #Ruta del archivo del cliente
     def path(self, client_id) -> Path:
         gw_id, n = client_id
-        return self.dir / f"client_{int(gw_id)}_{int(n)}.jsonl"
+        return self.dir / f"client_{int(gw_id)}_{int(n)}.csv"
 
 
     def _handle(self, client_id):
         key = tuple(client_id)
-        f = self._open.get(key)
-        if f is not None:
+        entry = self._open.get(key)
+        if entry is not None:
             self._open.move_to_end(key)
-            return f
+            return entry
         while len(self._open) >= self.max_open:
-            _, oldest = self._open.popitem(last=False)
+            _, (oldest, _) = self._open.popitem(last=False)
             oldest.close()
-        f = open(self.path(key), "a", encoding="utf-8")
-        self._open[key] = f
-        return f
+        f = open(self.path(key), "a", encoding="utf-8", newline="")
+        entry = self._open[key] = (f, csv.writer(f))
+        return entry
 
-    #Agrega un registro y lo baja a disco
     def append(self, client_id, record) -> None:
-        f = self._handle(client_id)
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        f, writer = self._handle(client_id)
+        writer.writerow(record)
         f.flush()
         if self.fsync:
             os.fsync(f.fileno())
 
     def _close(self, client_id) -> None:
-        f = self._open.pop(tuple(client_id), None)
-        if f is not None:
-            f.close()
+        entry = self._open.pop(tuple(client_id), None)
+        if entry is not None:
+            entry[0].close()
 
-    #Registros del cliente, en orden
     def read(self, client_id) -> Iterator:
         self._close(client_id)
         path = self.path(client_id)
         if not path.exists():
             return
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    yield json.loads(line)
+        with open(path, encoding="utf-8", newline="") as f:
+            for record in csv.reader(f):
+                if record:
+                    yield record
 
 
     def exists(self, client_id) -> bool:
@@ -68,8 +66,7 @@ class Spool:
         self._close(client_id)
         self.path(client_id).unlink(missing_ok=True)
 
-    #Cierra todos los archivos abiertos
     def close(self) -> None:
-        for f in self._open.values():
+        for f, _ in self._open.values():
             f.close()
         self._open.clear()
