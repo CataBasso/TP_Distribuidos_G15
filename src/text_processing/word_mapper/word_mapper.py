@@ -34,20 +34,21 @@ class WordMapper(Stage):
 
     def _on_input(self, message: dict) -> None:
         if message["type"] == "tokens":
-            self._on_tokens(message)
+            self._on_article(tuple(message["client_id"]), message["lang"], message["words"])
+        elif message["type"] == "tokens_batch":
+            client_id = tuple(message["client_id"])
+            for _url, lang, _period, _n, words in message["articles"]:
+                self._on_article(client_id, lang, words)
         elif message["type"] in ("eof", "stage_eof"):
             ctrl = stage_eof_message(message["client_id"], STAGE_ABSTRACT_CLEANER,message.get("origin", 0))
             self.bus.send(WM_CTRL, encode(ctrl))
         else:
             log.warning("word_mapper: tipo inesperado %s", message["type"])
 
-    def _on_tokens(self, message: dict) -> None:
-        client_id = tuple(message["client_id"])
-        words = message["words"]
+    def _on_article(self, client_id, lang, words) -> None:
         if words is None:
             self.stats["skipped_null"] += 1
             return
-        lang = message["lang"]
         if lang not in (EN, FR):
             self.stats["unknown_lang"] += 1
             log.warning("word_mapper: idioma desconocido %r", lang)

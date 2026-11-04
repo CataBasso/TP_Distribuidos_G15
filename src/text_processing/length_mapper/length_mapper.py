@@ -40,6 +40,10 @@ class LengthMapper(Stage):
     def _on_input(self, message: dict) -> None:
         if message["type"] == "tokens":
             self._on_tokens(message)
+        elif message["type"] == "tokens_batch":
+            client_id, batch_id = tuple(message["client_id"]), message.get("batch_id", 0)
+            for url, _lang, period, n, _words in message["articles"]:
+                self._on_article(client_id, url, period, n, batch_id)
         elif message["type"] in ("eof", "stage_eof"):
             ctrl = stage_eof_message(message["client_id"], STAGE_ABSTRACT_CLEANER,
                                      message.get("origin", 0))
@@ -48,20 +52,18 @@ class LengthMapper(Stage):
             log.warning("length_mapper: tipo inesperado %s", message["type"])
 
     def _on_tokens(self, message: dict) -> None:
-        client_id = tuple(message["client_id"])
         words = message["words"]
-        if words is None:
+        self._on_article(tuple(message["client_id"]), message["url"], message["period"], None if words is None else len(words), message.get("batch_id", 0))
+
+    def _on_article(self, client_id, url, period, n, batch_id) -> None:
+        if n is None:
             self.stats["skipped_null"] += 1
             return
-        n = len(words)
-        batch_id = message.get("batch_id", 0)
-        period = message["period"]
         if period == PERIOD_UP_TO_2020:
             self._accumulate(client_id, n, batch_id)
         elif period == PERIOD_FROM_2021:
-            body = encode(q5_article_message(client_id, message["url"], n, batch_id,
-                                             origin=self.replica_id))
-            self.bus.send(Q5_PEX, body, key=str(partition(message["url"], self.K)))
+            body = encode(q5_article_message(client_id, url, n, batch_id, origin=self.replica_id))
+            self.bus.send(Q5_PEX, body, key=str(partition(url, self.K)))
         else:
             self.stats["unknown_period"] += 1
             log.warning("length_mapper: período desconocido %r", period)
