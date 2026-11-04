@@ -27,6 +27,9 @@ STAGE_EOF = 28
 # Coordinacion entre replicas
 CONTROL = 29
 
+# Salida del AbstractCleaner: un mensaje por batch (no por artículo)
+TOKENS_BATCH = 30
+
 TYPE_NAMES = {
     BATCH: "batch",
     EOF: "eof",
@@ -45,6 +48,7 @@ TYPE_NAMES = {
     Q5_ARTICLE: "q5_article",
     STAGE_EOF: "stage_eof",
     CONTROL: "control",
+    TOKENS_BATCH: "tokens_batch",
 }
 
 NAME_TYPES = {name: code for code, name in TYPE_NAMES.items()}
@@ -77,6 +81,7 @@ REQUIRED_FIELDS = {
     Q5_ARTICLE: ("url", "word_count"),
     STAGE_EOF: ("stage", "origin"),
     CONTROL: ("stage", "replica", "count"),
+    TOKENS_BATCH: ("articles",),
 }
 
 # Campos adicionales que pueden aparecer en cada mensaje
@@ -98,6 +103,7 @@ OPTIONAL_FIELDS = {
     Q5_ARTICLE: ("client_id", "batch_id", "origin"),
     STAGE_EOF: ("client_id", "total"),
     CONTROL: ("client_id", "total"),
+    TOKENS_BATCH: ("client_id", "batch_id", "origin"),
 }
 
 
@@ -285,6 +291,16 @@ def tokens_message(url, lang, words, period, client_id, origin=0):
         "words": words,
         "period": period,
         "client_id": tuple(client_id),
+        "origin": origin,
+    }
+
+
+def tokens_batch_message(articles, client_id, batch_id=0, origin=0):
+    return {
+        "type": "tokens_batch",
+        "articles": articles,
+        "client_id": tuple(client_id),
+        "batch_id": batch_id,
         "origin": origin,
     }
 

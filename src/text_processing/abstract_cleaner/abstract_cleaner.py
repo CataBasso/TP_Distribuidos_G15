@@ -58,14 +58,17 @@ class AbstractCleaner:
 
     def _on_batch(self, client_id, message):
         batch_id = message["batch_id"]
+        articles = []
         for row in message["rows"]:
             try:
-                tokens = messages.tokens_message(row["url"], row["lang"], clean_abstract(row["abstract"]), row["period"],client_id, origin=self.id)
+                url, lang, period = row["url"], row["lang"], row["period"]
+                words = clean_abstract(row["abstract"])
             except (KeyError, TypeError) as e:
                 logging.warning("fila inválida (%s: %s), se descarta", type(e).__name__, e)
                 continue
-            tokens["batch_id"] = batch_id
-            self._send(tokens)
+            articles.append([url, lang, period, None if words is None else len(words), None if words is None else list(set(words))])
+        if articles:
+            self._send(messages.tokens_batch_message(articles, client_id, batch_id, origin=self.id))
 
         self.count[client_id] = self.count.get(client_id, 0) + 1
         if client_id in self.eof_total:
