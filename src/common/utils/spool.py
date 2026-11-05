@@ -43,6 +43,13 @@ class Spool:
         if self.fsync:
             os.fsync(f.fileno())
 
+    def append_many(self, client_id, records) -> None:
+        f, writer = self._handle(client_id)
+        writer.writerows(records)
+        f.flush()
+        if self.fsync:
+            os.fsync(f.fileno())
+
     def _close(self, client_id) -> None:
         entry = self._open.pop(tuple(client_id), None)
         if entry is not None:
