@@ -94,10 +94,13 @@ class Client:
                     send_eof(sock)
                     log.info("dataset enviado: %d filas", sent_rows)
             except OSError as e:
-                if self._receiver_error is None:
+                if self._receiver_error is None and not self._stopping:
                     self._receiver_error = e
 
             receiver.join()
+            if self._stopping:
+                log.info("cliente detenido por SIGTERM: sesión cerrada")
+                return
             if self._receiver_error is not None:
                 raise ClientError(f"sesión interrumpida: {self._receiver_error}") \
                     from self._receiver_error
@@ -107,7 +110,7 @@ class Client:
                 writer.close()
             sock.close()
 
-    #Corta la sesión (por ejemplo ante SIGTERM)
+
     def stop(self) -> None:
         self._stopping = True
         if self._sock is not None:

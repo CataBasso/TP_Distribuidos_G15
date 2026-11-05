@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 data/raw/
 data/sample/medium_dataset/
+data/sample/large_dataset/
 output/
 logs/
 spool/

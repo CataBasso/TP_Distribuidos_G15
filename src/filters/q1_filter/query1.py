@@ -127,7 +127,16 @@ class Q1Filter:
             self.close()
 
     def close(self):
-        pass
+        for name, endpoint in [("input", self.input_queue), ("results", self.results),
+                               ("control", self.control), ("abort", self.abort)]:
+            try:
+                endpoint.close()
+            except Exception as e:
+                logging.error(f"Error al cerrar '{name}': {e}")
+        try:
+            self.rc.close()
+        except Exception as e:
+            logging.error(f"Error al cerrar la conexión: {e}")
 
 
 def main():
