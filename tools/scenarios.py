@@ -21,7 +21,7 @@ SCENARIOS = {
     6: ("Múltiples clientes, todo replicado (incluye 2 Gateways)",
         dict(clients=3, gw=2, year=2, q1=2, q2=2, img=2, ac=2, lm=3, wm=2, P=2, A=2, K=3)),
     7: ("Múltiples clientes repartidos en varios Gateways (una réplica del resto)",
-        dict(clients=4, gw=2)),
+        dict(clients=3, gw=4, year=4, q1=4, q2=4, img=4, ac=4, lm=3, wm=4, P=4, A=4, K=4)),
 }
 
 SIZES = {"small": ("small_dataset", "small"), "medium": ("medium_dataset", "medium"), "large": ("large_dataset", "large")}
