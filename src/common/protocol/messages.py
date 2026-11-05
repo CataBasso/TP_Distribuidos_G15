@@ -30,6 +30,9 @@ CONTROL = 29
 # Salida del AbstractCleaner: un mensaje por batch (no por artículo)
 TOKENS_BATCH = 30
 
+# Salida del LengthMapper hacia Q5Filter: un mensaje por batch y por particion (no por artículo)
+Q5_ARTICLES_BATCH = 31
+
 TYPE_NAMES = {
     BATCH: "batch",
     EOF: "eof",
@@ -49,6 +52,7 @@ TYPE_NAMES = {
     STAGE_EOF: "stage_eof",
     CONTROL: "control",
     TOKENS_BATCH: "tokens_batch",
+    Q5_ARTICLES_BATCH: "q5_articles_batch",
 }
 
 NAME_TYPES = {name: code for code, name in TYPE_NAMES.items()}
@@ -82,6 +86,7 @@ REQUIRED_FIELDS = {
     STAGE_EOF: ("stage", "origin"),
     CONTROL: ("stage", "replica", "count"),
     TOKENS_BATCH: ("articles",),
+    Q5_ARTICLES_BATCH: ("articles",),
 }
 
 # Campos adicionales que pueden aparecer en cada mensaje
@@ -104,6 +109,7 @@ OPTIONAL_FIELDS = {
     STAGE_EOF: ("client_id", "total"),
     CONTROL: ("client_id", "total"),
     TOKENS_BATCH: ("client_id", "batch_id", "origin"),
+    Q5_ARTICLES_BATCH: ("client_id", "batch_id", "origin"),
 }
 
 
@@ -352,6 +358,17 @@ def q5_article_message(
         "client_id": tuple(client_id),
         "url": url,
         "word_count": word_count,
+        "batch_id": batch_id,
+        "origin": origin,
+    }
+
+
+def q5_articles_batch_message(client_id, articles, batch_id=0, origin=0):
+    """articles: lista de [url, word_count]"""
+    return {
+        "type": "q5_articles_batch",
+        "client_id": tuple(client_id),
+        "articles": articles,
         "batch_id": batch_id,
         "origin": origin,
     }

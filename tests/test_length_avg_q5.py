@@ -144,6 +144,8 @@ def test_q5_particiona_por_url(tmp_path):
         m = decode(b)
         if ex == Q5_PEX and m["type"] == "q5_article":
             assert k == str(partition(m["url"], 3))
+        if ex == Q5_PEX and m["type"] == "q5_articles_batch":
+            assert all(k == str(partition(url, 3)) for url, _n in m["articles"])
 
 
 def test_lm_no_termina_hasta_tener_los_eof_de_todos_los_cleaners(tmp_path):
@@ -321,3 +323,73 @@ def test_promedio_duplicado_antes_de_terminar_no_vuelve_a_emitir(tmp_path):
     q5_eof(bus)
     bus.drain()
     assert [r["url"] for r in results(bus)[0]] == ["a"]
+
+
+# --- batching: LengthMapper -> Q5Filter manda un mensaje por batch y por partición ----------------
+from common.protocol.messages import q5_articles_batch_message, tokens_batch_message  # noqa: E402
+
+
+def batch_body(articles, client=C, batch_id=0):
+    """articles: [(url, period, n_words)] -> tokens_batch como lo manda el AbstractCleaner."""
+    rows = [[url, "en", period, n, [f"w{i}" for i in range(n)]] for url, period, n in articles]
+    return encode(tokens_batch_message(rows, client, batch_id, origin=0))
+
+
+def test_lm_manda_un_mensaje_por_batch_y_particion_no_uno_por_articulo(tmp_path):
+    bus, _, _ = build(tmp_path, lm=1, cleaners=1, A=1, K=2)
+    bus.send(TOK_EX, batch_body([(f"u{i}", NEW, 5) for i in range(20)]))
+    bus.drain()
+    msgs = [(k, decode(b)) for ex, k, b in bus.sent if ex == Q5_PEX and decode(b)["type"] != "eof"]
+    assert all(m["type"] == "q5_articles_batch" for _, m in msgs)
+    assert len(msgs) <= 2                                         # una por partición, no 20
+    assert sorted(url for _, m in msgs for url, _n in m["articles"]) == sorted(f"u{i}" for i in range(20))
+    for k, m in msgs:
+        assert all(k == str(partition(url, 2)) for url, _n in m["articles"])
+
+
+def test_batch_mixto_acumula_promedio_y_manda_q5(tmp_path):
+    bus, _, _ = build(tmp_path, lm=1, cleaners=1, A=1, K=1)
+    bus.send(TOK_EX, batch_body([("o1", OLD, 2), ("o2", OLD, 4), ("n1", NEW, 3), ("n2", NEW, 9)]))
+    bus.send(TOK_EX, cleaner_eof(C, origin=0))
+    bus.drain()
+    assert [r["url"] for r in results(bus)[0]] == ["n2"]          # promedio = 3, estrictamente mayor
+    assert results(bus)[1] != []
+
+
+def test_batch_con_articulo_nulo_o_periodo_invalido_no_rompe(tmp_path):
+    bus, stages, _ = build(tmp_path, lm=1, cleaners=1, A=1, K=1)
+    rows = [["a", "en", OLD, None, None], ["b", "en", "xx", 3, ["w"]], ["c", "en", NEW, 7, ["w"] * 7],
+            ["d", "en", OLD, 1, ["w"]]]
+    bus.send(TOK_EX, encode(tokens_batch_message(rows, C, 0, origin=0)))
+    bus.send(TOK_EX, cleaner_eof(C, origin=0))
+    bus.drain()
+    lm = stages[0]
+    assert lm.stats["skipped_null"] == 1 and lm.stats["unknown_period"] == 1
+    assert [r["url"] for r in results(bus)[0]] == ["c"]
+
+
+def q5_batch(bus, articles, client=C):
+    bus.send(Q5_PEX, encode(q5_articles_batch_message(client, [list(a) for a in articles], 0, origin=0)), key="0")
+
+
+def test_q5_batch_antes_del_promedio_va_al_spool_y_se_filtra_despues(tmp_path):
+    bus, q5 = q5_alone(tmp_path)
+    q5_batch(bus, [("a", 9), ("b", 2), ("c", 5)])
+    bus.drain()
+    assert q5.spool.exists(C)
+    average(bus, 4.0)
+    q5_eof(bus)
+    bus.drain()
+    assert sorted(r["url"] for r in results(bus)[0]) == ["a", "c"]
+    assert not q5.spool.exists(C)
+
+
+def test_q5_batch_despues_del_promedio_no_pasa_por_el_spool(tmp_path):
+    bus, q5 = q5_alone(tmp_path)
+    average(bus, 4.0)
+    q5_batch(bus, [("a", 9), ("b", 2), ("c", 5)])
+    bus.drain()
+    assert not q5.spool.exists(C)
+    q5_eof(bus)
+    bus.drain()
+    assert sorted(r["url"] for r in results(bus)[0]) == ["a", "c"]

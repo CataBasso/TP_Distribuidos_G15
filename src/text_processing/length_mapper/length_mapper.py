@@ -1,7 +1,7 @@
 import logging
 
 from common.protocol.messages import (
-    average_data_message, encode, eof_message, q5_article_message, stage_eof_message,
+    average_data_message, encode, eof_message, q5_articles_batch_message, stage_eof_message,
 )
 from common.stage import EofCounter, Stage
 from common.topology import (
@@ -42,8 +42,8 @@ class LengthMapper(Stage):
             self._on_tokens(message)
         elif message["type"] == "tokens_batch":
             client_id, batch_id = tuple(message["client_id"]), message.get("batch_id", 0)
-            for url, _lang, period, n, _words in message["articles"]:
-                self._on_article(client_id, url, period, n, batch_id)
+            self._on_batch(client_id, batch_id,
+                           [(url, period, n) for url, _lang, period, n, _words in message["articles"]])
         elif message["type"] in ("eof", "stage_eof"):
             ctrl = stage_eof_message(message["client_id"], STAGE_ABSTRACT_CLEANER,
                                      message.get("origin", 0))
@@ -53,22 +53,29 @@ class LengthMapper(Stage):
 
     def _on_tokens(self, message: dict) -> None:
         words = message["words"]
-        self._on_article(tuple(message["client_id"]), message["url"], message["period"], None if words is None else len(words), message.get("batch_id", 0))
+        n = None if words is None else len(words)
+        self._on_batch(tuple(message["client_id"]), message.get("batch_id", 0),
+                       [(message["url"], message["period"], n)])
 
-    def _on_article(self, client_id, url, period, n, batch_id) -> None:
-        if n is None:
-            self.stats["skipped_null"] += 1
-            return
-        if period == PERIOD_UP_TO_2020:
-            self._accumulate(client_id, n, batch_id)
-        elif period == PERIOD_FROM_2021:
-            body = encode(q5_article_message(client_id, url, n, batch_id, origin=self.replica_id))
-            self.bus.send(Q5_PEX, body, key=str(partition(url, self.K)))
-        else:
-            self.stats["unknown_period"] += 1
-            log.warning("length_mapper: período desconocido %r", period)
-            return
-        self.stats["articles"] += 1
+    def _on_batch(self, client_id, batch_id, articles) -> None:
+        """Procesa un batch completo. Los artículos >= 2021 se agrupan por partición de Q5 y se
+        mandan en un solo mensaje por partición (en vez de uno por artículo)."""
+        by_partition = {}
+        for url, period, n in articles:
+            if n is None:
+                self.stats["skipped_null"] += 1
+            elif period == PERIOD_UP_TO_2020:
+                self._accumulate(client_id, n, batch_id)
+                self.stats["articles"] += 1
+            elif period == PERIOD_FROM_2021:
+                by_partition.setdefault(partition(url, self.K), []).append([url, n])
+                self.stats["articles"] += 1
+            else:
+                self.stats["unknown_period"] += 1
+                log.warning("length_mapper: período desconocido %r", period)
+        for k, rows in by_partition.items():
+            body = encode(q5_articles_batch_message(client_id, rows, batch_id, origin=self.replica_id))
+            self.bus.send(Q5_PEX, body, key=str(k))
 
     def _accumulate(self, client_id, n: int, batch_id) -> None:
         acc = self._acc.get(client_id)

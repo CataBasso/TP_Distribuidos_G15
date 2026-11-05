@@ -81,3 +81,10 @@ def test_sin_wipe_conserva_los_archivos(tmp_path):
     viejo.append(C, ["a", 1])
     viejo.close()
     assert list(Spool(tmp_path, wipe=False).read(C)) == [["a", "1"]]
+
+
+def test_append_many_equivale_a_varios_append_en_orden(tmp_path):
+    s = Spool(tmp_path)
+    s.append(C, ["a", 1])
+    s.append_many(C, [["b", 2], ["c, con coma", 3]])
+    assert list(s.read(C)) == [["a", "1"], ["b", "2"], ["c, con coma", "3"]]

@@ -33,7 +33,14 @@ class Q5Filter(Stage):
 
     def _on_article(self, message: dict) -> None:
         client_id = tuple(message["client_id"])
-        if message["type"] == "q5_article":
+        if message["type"] == "q5_articles_batch":
+            articles = message["articles"]
+            if client_id in self._average:
+                for url, n in articles:
+                    self._emit_if_greater(client_id, url, n)
+            else:
+                self.spool.append_many(client_id, articles)
+        elif message["type"] == "q5_article":
             if client_id in self._average:                
                 self._emit_if_greater(client_id, message["url"], message["word_count"])
             else:                                          
