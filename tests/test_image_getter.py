@@ -2,8 +2,9 @@ import os
 
 os.environ.setdefault("ID", "1")
 os.environ.setdefault("MOM_HOST", "localhost")
+os.environ.setdefault("IMAGE_RETRY_SLEEP", "0")
 
-from image.image_getter import fetch_images, parse_image_url  # noqa: E402
+from image.image_getter import ImageCache, fetch_images, parse_image_url  # noqa: E402
 
 
 class FakeWiki:
@@ -51,3 +52,63 @@ def test_titles_of_a_host_go_in_one_api_call():
     wiki = FakeWiki({})
     fetch_images(rows, wiki)
     assert len(wiki.api_calls) == 1 and wiki.api_calls[0][1] == ["File:a.jpg", "File:b.jpg", "File:c.jpg"]
+
+
+class FlakyWiki(FakeWiki):
+    """Falla las primeras `n` veces (429 / timeout) y después funciona."""
+
+    def __init__(self, known, api_failures=0, download_failures=0):
+        super().__init__(known)
+        self.api_failures, self.download_failures = api_failures, download_failures
+        self.downloads = 0
+
+    def original_urls(self, host, titles):
+        if self.api_failures:
+            self.api_failures -= 1
+            raise RuntimeError("429")
+        return super().original_urls(host, titles)
+
+    def download(self, url):
+        self.downloads += 1
+        if self.download_failures:
+            self.download_failures -= 1
+            raise RuntimeError("timeout")
+        return super().download(url)
+
+
+A = "https://upload.wikimedia.org/wikipedia/commons/3/3b/A.jpg"
+KNOWN = {("commons.wikimedia.org", "File:A.jpg"): "http://orig/A"}
+
+
+def test_transient_api_failure_is_retried_and_image_is_not_lost():
+    wiki = FlakyWiki(KNOWN, api_failures=1)
+    out = fetch_images([{"name": "a", "url": "ua", "image_url": A}], wiki)
+    assert out[0]["image"] == b"bytes:http://orig/A"
+
+
+def test_transient_download_failure_is_retried():
+    wiki = FlakyWiki(KNOWN, download_failures=2)
+    out = fetch_images([{"name": "a", "url": "ua", "image_url": A}], wiki, rounds=3)
+    assert out[0]["image"] == b"bytes:http://orig/A" and wiki.downloads == 3
+
+
+def test_definitive_absence_is_not_retried():
+    wiki = FlakyWiki({})                        # la API contesta que el archivo no existe
+    out = fetch_images([{"name": "a", "url": "ua", "image_url": A}], wiki, rounds=5)
+    assert out[0]["image"] is None and len(wiki.api_calls) == 1
+
+
+def test_gives_up_after_the_rounds_and_reports_error(caplog):
+    wiki = FlakyWiki(KNOWN, download_failures=99)
+    out = fetch_images([{"name": "a", "url": "ua", "image_url": A}], wiki, rounds=2)
+    assert out[0]["image"] is None
+    assert any(r.levelname == "ERROR" for r in caplog.records)
+
+
+def test_cache_avoids_downloading_the_same_image_twice(tmp_path):
+    cache = ImageCache(str(tmp_path))
+    wiki = FlakyWiki(KNOWN)
+    rows = [{"name": "a", "url": "ua", "image_url": A}]
+    first = fetch_images(rows, wiki, cache)
+    second = fetch_images(rows, wiki, cache)
+    assert first == second and wiki.downloads == 1 and len(wiki.api_calls) == 1

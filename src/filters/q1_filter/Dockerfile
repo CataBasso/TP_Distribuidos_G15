@@ -1,6 +1,5 @@
-FROM python:3-alpine
+FROM tpdist/base:latest
 
-RUN pip3 install pika
 
 COPY common ./common
 COPY filters/q1_filter .

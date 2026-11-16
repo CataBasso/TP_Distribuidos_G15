@@ -1,5 +1,7 @@
 import logging
 import collections
+import heapq
+from common.memory import release_memory
 
 from common.protocol.messages import encode, eof_message, partial_top_message, result_message
 from common.stage import EofCounter, Stage
@@ -48,6 +50,8 @@ class WordReducer(Stage):
         shared = self._emit_shared(client_id, words)
         self._emit_local_top(client_id, words)
         self.eofs.forget(client_id)
+        del words
+        release_memory()
         log.info("word_reducer[%d]: cliente %s -> %d palabras compartidas",
                  self.partition_id, client_id, shared)
 
@@ -72,9 +76,8 @@ class WordReducer(Stage):
         self.bus.send(RESULTS_EX, body, key=gw_key)
 
     def _emit_local_top(self, client_id, words) -> None:
-        words_counter = collections.Counter(
-            {w: en + fr for w, (en, fr) in sorted(words.items())})
-        top = dict(words_counter.most_common(self.top_n))
+        best = heapq.nsmallest(self.top_n, ((-(en + fr), w) for w, (en, fr) in words.items()))
+        top = {w: -neg for neg, w in best}
         self.bus.send("", encode(partial_top_message(top, client_id, origin=self.partition_id)),
                       key=TOP_IN)
         self.bus.send("", encode(eof_message(client_id, origin=self.partition_id)), key=TOP_IN)
@@ -82,6 +85,7 @@ class WordReducer(Stage):
     def on_abort(self, client_id) -> None:
         self._words.pop(client_id, None)
         self.eofs.forget(client_id)
+        release_memory()
 
 def main() -> None:
     bus = RabbitBus(broker_host())

@@ -1,3 +1,4 @@
+from common.bounded_set import BoundedSet
 import logging
 import os
 import re
@@ -40,8 +41,8 @@ class AbstractCleaner:
         self.count = {}        
         self.eof_total = {}    
         self.reported = {}     
-        self.done = set()
-        self.aborted = set()
+        self.done = BoundedSet()
+        self.aborted = BoundedSet()
 
     def on_data(self, body, ack, nack):
         message = internal.deserialize(body)

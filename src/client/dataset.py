@@ -1,12 +1,16 @@
 from pathlib import Path
 from typing import Iterator
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 COLUMNS = ["url", "name", "in_language", "date_modified", "abstract", "sections", "image"]
 DEFAULT_BATCH_ROWS = 200
 DEFAULT_BATCH_BYTES = 1 << 20 # 1MiB
-_READ_CHUNK = 1000 
+import os
+
+# filas que se convierten a Python de una vez (no cambia el row group que Arrow lee del disco)
+READ_CHUNK = int(os.environ.get("PARQUET_READ_CHUNK", DEFAULT_BATCH_ROWS))
 
 
 def parquet_files(data_dir) -> list[Path]:
@@ -40,9 +44,14 @@ def iter_rows(data_dir) -> Iterator[dict]:
     if not files:
         raise FileNotFoundError(f"no hay archivos .parquet bajo {data_dir}")
     for path in files:
-        for chunk in pq.ParquetFile(path).iter_batches(batch_size=_READ_CHUNK, columns=COLUMNS):
-            for record in chunk.to_pylist():
-                yield project(record)
+        reader = pq.ParquetFile(path)
+        try:
+            for chunk in reader.iter_batches(batch_size=READ_CHUNK, columns=COLUMNS):
+                for record in chunk.to_pylist():
+                    yield project(record)
+        finally:
+            reader.close()
+            pa.default_memory_pool().release_unused()      # devuelve al SO la memoria Arrow del archivo
 
 
 def iter_batches(data_dir, max_rows: int = DEFAULT_BATCH_ROWS,

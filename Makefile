@@ -14,24 +14,55 @@ setup:
 	python3 -m venv $(VENV)
 	$(PIP) install -r requirements.txt
 
-up:
-	mkdir -p output
-	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
-	docker compose -f docker-compose.yaml logs --follow
-down:
-	docker compose -f docker-compose.yaml stop -t 5
-	docker compose -f docker-compose.yaml down
+COMPOSE := docker compose -f docker-compose.yaml
+COMPOSE_ALL := $(COMPOSE) --profile clients
+KEEP ?= 1
+CLEAN_OUTPUT = rm -rf ./output/* 2>/dev/null || docker run --rm -v "$(PWD)/output:/o" alpine sh -c 'rm -rf /o/*'
 
-test: switch
+
+# 1) make build        construye (o reutiliza la cache de) las imágenes: SOLO hace falta cuando cambia el código
+# 2) make system-up    levanta RabbitMQ + Gateways + etapas y las deja corriendo (no toca los clientes)
+# 3) make run-clients  corre los clientes del escenario sobre el sistema ya levantado (repetible)
+# 4) make verify       compara output/ con data/expected/$(SIZE)
+# 5) make system-down  recién acá se baja todo
+.PHONY: build system-up run-clients verify system-down new-client
+
+build:                     ## imagen base + una imagen por TIPO de etapa (capas cacheadas)
+	docker build -t tpdist/base:latest -f src/Dockerfile.base src/
+	$(COMPOSE_ALL) build
+
+system-up:                 ## levanta el sistema (sin clientes) y espera a que esté listo
 	mkdir -p output
-	rm -rf ./output/*
-	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	COMPOSE_HTTP_TIMEOUT=300 $(COMPOSE) up -d --no-build --remove-orphans --wait
+
+run-clients:               ## corre todos los client_* sobre el sistema ya levantado
+	mkdir -p output
+	$(CLEAN_OUTPUT)
+	$(COMPOSE_ALL) up -d --no-build --no-deps --force-recreate $$(python3 tools/verify_output.py --list-clients)
+
+new-client:                ## un cliente más contra el sistema en marcha: make new-client C=client_1
+	$(COMPOSE_ALL) up -d --no-build --no-deps --force-recreate $(C)
+
+verify:                    ## espera a los clientes y compara con lo esperado (no baja nada)
+	python3 tools/verify_output.py --wait --expected data/expected/$(SIZE)
+
+system-down:
+	$(COMPOSE_ALL) stop -t 5
+	$(COMPOSE_ALL) down -v --remove-orphans
+
+up: build system-up run-clients
+	$(COMPOSE_ALL) logs --follow
+down: system-down
+
+test: switch build
+	mkdir -p output
+	$(CLEAN_OUTPUT)
+	$(MAKE) --no-print-directory system-up run-clients
 	docker logs --follow client_0
 	docker wait $$(docker ps -a --filter "name=client_" --format '{{.Names}}')
 	EXPECTED_DIR=data/expected/$(SIZE) OUTPUT_ROOT=output \
 		$(PYTEST) $(QUERY_TEST_FILE) -v; EXIT_CODE=$$?; \
-	docker compose -f docker-compose.yaml stop -t 5; \
-	docker compose -f docker-compose.yaml down; \
+	if [ "$(KEEP)" = "0" ]; then $(MAKE) --no-print-directory system-down; fi; \
 	exit $$EXIT_CODE
 
 logs:
@@ -91,37 +122,36 @@ run-client:
 run-fake-system:
 	PYTHONPATH=src $(VENV)/bin/python tools/fake_system.py --gw-id 1 --rabbit-host localhost
 
-# --- escenarios de réplicas (tools/scenarios.py): ver README, sección "Escenarios" ---
 .PHONY: scenarios switch test-scenario test-all-scenarios test-scenarios test-random
 
 scenarios:
-	python3 tools/scenarios.py generate --size $(SIZE) --random $(or $(RANDOM_N),0) --seed $(or $(SEED),0)
+	python3 tools/scenarios.py generate --size $(SIZE) --random $(or $(RANDOM_N),0) --seed $(or $(SEED),0) --rabbit-cpus $(or $(RABBIT_CPUS),2.0)
 
 switch: scenarios
 	@python3 tools/scenarios.py list; \
 	n="$(N)"; if [ -z "$$n" ]; then read -p "Selecciona uno: " n; fi; \
 	python3 tools/scenarios.py switch $$n
 
-test-scenario:             ## con Docker: levanta docker-compose.yaml, espera a los clientes, compara y guarda logs
+test-scenario: build      ##con Docker: levanta el sistema, corre los clientes, compara y guarda logs. KEEP=0 baja todo al final (por defecto queda corriendo)
 	mkdir -p output logs
-	rm -rf ./output/* 2>/dev/null || docker run --rm -v "$(PWD)/output:/o" alpine sh -c 'rm -rf /o/*'
-	docker compose -f docker-compose.yaml down -v --remove-orphans
-	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	$(CLEAN_OUTPUT)
+	$(COMPOSE_ALL) down -v --remove-orphans
+	$(MAKE) --no-print-directory system-up run-clients
 	python3 tools/verify_output.py --wait --expected data/expected/$(or $(SIZE),small); EXIT_CODE=$$?; \
-	docker compose -f docker-compose.yaml logs --no-color > logs/$(or $(LOG),last).log 2>&1; \
-	docker compose -f docker-compose.yaml stop -t 5; docker compose -f docker-compose.yaml down -v; \
+	$(COMPOSE_ALL) logs --no-color > logs/$(or $(LOG),last).log 2>&1; \
+	if [ "$(KEEP)" = "0" ]; then $(MAKE) --no-print-directory system-down; fi; \
 	exit $$EXIT_CODE
 
-test-all-scenarios:        ## con Docker: todos los escenarios fijos (python3 tools/scenarios.py ids), uno tras otro (SIZE=small|medium)
+test-all-scenarios:        ##con Docker: todos los escenarios fijos (python3 tools/scenarios.py ids), uno tras otro (SIZE=small|medium)
 	@fail=0; for n in $$(python3 tools/scenarios.py ids); do \
 	  echo "=== escenario $$n ($(or $(SIZE),small)) ==="; \
-	  python3 tools/scenarios.py generate --size $(or $(SIZE),small) > /dev/null; \
+	  python3 tools/scenarios.py generate --size $(or $(SIZE),small) --rabbit-cpus $(or $(RABBIT_CPUS),2.0) > /dev/null; \
 	  python3 tools/scenarios.py switch $$n; \
-	  $(MAKE) --no-print-directory test-scenario SIZE=$(or $(SIZE),small) LOG=$(or $(SIZE),small)_$$n || fail=1; \
+	  $(MAKE) --no-print-directory test-scenario KEEP=0 SIZE=$(or $(SIZE),small) LOG=$(or $(SIZE),small)_$$n || fail=1; \
 	done; echo; [ $$fail -eq 0 ] && echo "TODOS OK" || echo "HUBO FALLAS (logs en logs/)"; exit $$fail
 
-test-scenarios:            ## SIN Docker: corre todos los escenarios fijos en un proceso (RabbitMQ falso)
+test-scenarios:            ##SIN Docker: corre todos los escenarios fijos en un proceso (RabbitMQ falso)
 	PYTHONPATH=src:tests:tools $(VENV)/bin/python tests/real_flow.py
 
-test-random:               ## SIN Docker: N escenarios aleatorios (make test-random RANDOM_N=10 SEED=3)
+test-random:               ##SIN Docker: N escenarios aleatorios (make test-random RANDOM_N=10 SEED=3)
 	PYTHONPATH=src:tests:tools $(VENV)/bin/python tests/real_flow.py --random $(or $(RANDOM_N),10) --seed $(or $(SEED),0)

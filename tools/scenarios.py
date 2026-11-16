@@ -24,6 +24,9 @@ SCENARIOS = {
         dict(clients=3, gw=4, year=4, q1=4, q2=4, img=4, ac=4, lm=3, wm=4, P=4, A=4, K=4)),
 }
 
+# CPU máxima de RabbitMQ. Se cambia con `make scenarios RABBIT_CPUS=1`.
+DEFAULT_RABBIT_CPUS = "2.0"
+
 SIZES = {"small": ("small_dataset", "small"), "medium": ("medium_dataset", "medium"), "large": ("large_dataset", "large")}
 
 
@@ -44,9 +47,17 @@ def describe(s):
 
 
 def _svc(name, dockerfile, env, depends=None, context="./src/", volumes=(), ports=(),
-         healthcheck=None):
-    lines = [f"  {name}:", "    build:", f"      context: {context}",
-             f"      dockerfile: {dockerfile}", f"    container_name: {name}"]
+         healthcheck=None, image=None, build=True, extra=()):
+
+    lines = [f"  {name}:"]
+    if image:
+        lines.append(f"    image: {image}")
+    if build:
+        lines += ["    build:", f"      context: {context}", f"      dockerfile: {dockerfile}"]
+    else:
+        lines.append("    pull_policy: never")
+    lines.append(f"    container_name: {name}")
+    lines += list(extra)
     if depends == "rabbit":
         lines += ["    depends_on:", "      rabbitmq:", "        condition: service_healthy"]
     elif depends:
@@ -62,7 +73,7 @@ def _svc(name, dockerfile, env, depends=None, context="./src/", volumes=(), port
     return "\n".join(lines)
 
 
-def compose(s, size="small"):
+def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
     """YAML del docker-compose del escenario s (dict completo)."""
     dataset, _ = SIZES[size]
     mom = "MOM_HOST=rabbitmq"
@@ -70,6 +81,7 @@ def compose(s, size="small"):
     out = []
 
     out.append(_svc("rabbitmq", "Dockerfile", ["RABBITMQ_LOG_LEVELS=error"], context="./src/rabbitmq",
+                    image="tpdist/rabbitmq:latest", extra=[f'    cpus: "{rabbit_cpus}"'],
                     ports=["5672:5672", "15672:15672"], healthcheck=[
                         "    healthcheck:", "      interval: 5s", "      retries: 10",
                         "      start_period: 50s",
@@ -82,20 +94,24 @@ def compose(s, size="small"):
         stage_names.append(name)
         out.append(_svc(name, "gateway/Dockerfile",
                         [f"GATEWAY_ID={g + 1}", "GATEWAY_PORT=5000", "RABBIT_HOST=rabbitmq",
-                         f"WORD_PARTITIONS={s['P']}", f"Q5_PARTITIONS={s['K']}", py], "rabbit"))
+                         f"WORD_PARTITIONS={s['P']}", f"Q5_PARTITIONS={s['K']}", py], "rabbit",
+                        image="tpdist/gateway:latest", build=(g == 0)))
 
-    def replicas(prefix, count, dockerfile, env_of):
+    def replicas(prefix, count, dockerfile, env_of, volumes=()):
         for i in range(count):
             name = f"{prefix}_{i}"
             stage_names.append(name)
-            out.append(_svc(name, dockerfile, [f"ID={i}", mom] + env_of + [py], "rabbit"))
+            out.append(_svc(name, dockerfile, [f"ID={i}", mom] + env_of + [py], "rabbit",
+                            image=f"tpdist/{prefix}:latest", build=(i == 0), volumes=volumes))
 
     replicas("year_filter", s["year"], "filters/year_filter/Dockerfile",
              ["INPUT_QUEUE=year_in", "Q1_QUEUE=q1_in", "Q2_QUEUE=q2_in", "NORM_QUEUE=norm_in"])
     replicas("q1_filter", s["q1"], "filters/q1_filter/Dockerfile", ["INPUT_QUEUE=q1_in"])
     replicas("q2_filter", s["q2"], "filters/q2_filter/Dockerfile",
              ["INPUT_QUEUE=q2_in", "OUTPUT_QUEUE=img_in"])
-    replicas("image_getter", s["img"], "image/Dockerfile", ["INPUT_QUEUE=img_in"])
+    # cache de imágenes compartida entre réplicas y clientes (ver ImageCache en image_getter.py)
+    replicas("image_getter", s["img"], "image/Dockerfile",
+             ["INPUT_QUEUE=img_in", "IMAGE_CACHE_DIR=/cache"], volumes=["image_cache:/cache"])
     replicas("abstract_cleaner", s["ac"], "text_processing/abstract_cleaner/Dockerfile",
              ["INPUT_QUEUE=norm_in"])
     replicas("length_mapper", s["lm"], "text_processing/length_mapper/Dockerfile",
@@ -109,18 +125,22 @@ def compose(s, size="small"):
              [f"WM_REPLICAS={s['wm']}"])
     stage_names.append("top_merger")
     out.append(_svc("top_merger", "text_processing/top_merger/Dockerfile",
-                    [mom, f"WORD_PARTITIONS={s['P']}", py], "rabbit"))
+                    [mom, f"WORD_PARTITIONS={s['P']}", py], "rabbit",
+                    image="tpdist/top_merger:latest"))
 
     for c in range(s["clients"]):
         out.append(_svc(f"client_{c}", "client/Dockerfile",
                         [f"GATEWAY_HOST=gateway_{c % s['gw']}", "GATEWAY_PORT=5000", "DATA_DIR=/data",
-                         f"OUTPUT_DIR=/output/client_{c}", py], stage_names,
+                         f"OUTPUT_DIR=/output/client_{c}", py],
+                        [f"gateway_{g}" for g in range(s["gw"])],
+                        image="tpdist/client:latest", build=(c == 0),
+                        extra=['    profiles: ["clients"]'],
                         volumes=[f"./data/sample/{dataset}:/data:ro", "./output:/output"]))
     header = f"# Generado por tools/scenarios.py -- {describe(s)}\n"
-    return header + "services:\n" + "\n".join(out) + "\n"
+    return header + "services:\n" + "\n".join(out) + "\nvolumes:\n  image_cache:\n"
 
 
-def write_all(size, random_n, seed):
+def write_all(size, random_n, seed, rabbit_cpus=DEFAULT_RABBIT_CPUS):
     d = ROOT / "scenarios"
     d.mkdir(exist_ok=True)
     written = {}
@@ -130,7 +150,7 @@ def write_all(size, random_n, seed):
     for i in range(random_n):
         written[100 + i] = random_scenario(rng)
     for n, s in written.items():
-        (d / f"{n}.yaml").write_text(compose(s, size))
+        (d / f"{n}.yaml").write_text(compose(s, size, rabbit_cpus))
     return written
 
 
@@ -143,6 +163,8 @@ def main(argv=None):
     g.add_argument("--size", choices=list(SIZES), default="small")
     g.add_argument("--random", type=int, default=0, help="cantidad de escenarios aleatorios extra")
     g.add_argument("--seed", type=int, default=0)
+    g.add_argument("--rabbit-cpus", default=DEFAULT_RABBIT_CPUS,
+                   help="CPUs máximas del contenedor de RabbitMQ (ej. 1, 1.5, 2.0)")
     sw = sub.add_parser("switch")
     sw.add_argument("n", type=int)
     a = p.parse_args(argv)
@@ -152,7 +174,7 @@ def main(argv=None):
         for n, (desc, over) in SCENARIOS.items():
             print(f"{n}) {desc}\n     {describe(full(over))}")
     elif a.cmd == "generate":
-        for n, s in write_all(a.size, a.random, a.seed).items():
+        for n, s in write_all(a.size, a.random, a.seed, a.rabbit_cpus).items():
             print(f"scenarios/{n}.yaml  {describe(s)}")
     else:
         src = ROOT / "scenarios" / f"{a.n}.yaml"

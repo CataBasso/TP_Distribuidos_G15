@@ -1,3 +1,4 @@
+from common.bounded_set import BoundedSet
 import json
 import logging
 import os
@@ -54,8 +55,8 @@ class Q2Filter:
         self.eof_total = {}    
         self.reported = {}      
         self.holds_eof = set()  
-        self.done = set()
-        self.aborted = set()
+        self.done = BoundedSet()
+        self.aborted = BoundedSet()
 
     def on_data(self, body, ack, nack):
         message = internal.deserialize(body)

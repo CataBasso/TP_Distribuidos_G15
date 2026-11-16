@@ -3,8 +3,6 @@ from itertools import count
 
 
 class InMemoryBus:
-    """Broker en memoria, de un solo hilo y determinista. Muchas etapas pueden compartir un
-    mismo InMemoryBus (así se prueba el flujo completo). drain() entrega todo lo pendiente."""
 
     def __init__(self):
         self.queues = {}
@@ -96,7 +94,10 @@ class RabbitBus:
     """Bus sobre common.middleware. Una conexión (RabbitConnection) por proceso: todas las
     colas que se consumen comparten el hilo, y los callbacks corren de a uno."""
 
-    def __init__(self, host, prefetch=10, durable=True, kinds=None):
+    def __init__(self, host, prefetch=None, durable=True, kinds=None):
+        import os
+        if prefetch is None:
+            prefetch = int(os.environ.get("PREFETCH", "10"))
         from common.middleware import RabbitConnection
         from common.topology import EXCHANGE_KINDS
         self.host, self.durable = host, durable

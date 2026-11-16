@@ -1,3 +1,4 @@
+from common.bounded_set import BoundedSet
 import logging
 
 from common.protocol import decode
@@ -32,7 +33,7 @@ class Stage:
 
     def __init__(self, bus):
         self.bus = bus
-        self.aborted = set()
+        self.aborted = BoundedSet()
 
     def start(self) -> None:
         raise NotImplementedError

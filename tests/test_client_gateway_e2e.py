@@ -53,7 +53,7 @@ def rows(path):
 
 def test_full_session_matches_expected_results(tmp_path):
     broker = InMemoryBroker()
-    gateway = Gateway(1, broker, "127.0.0.1", 0)
+    gateway = Gateway(1, broker, "127.0.0.1", 0, epoch=0)
     port = gateway.start()
     seen = []
     t = threading.Thread(target=fake_pipeline, args=(broker, seen), daemon=True); t.start()
@@ -85,12 +85,12 @@ def test_full_session_matches_expected_results(tmp_path):
     assert [(r["name"], r["url"]) for r in q2] == [(r["name"], r["url"]) for r in want_q2]
     first = q2[0]
     assert first["image_sha256"] == hashlib.sha256(first["url"].encode()).hexdigest()
-    assert (tmp_path / "images" / first["image_sha256"]).read_bytes() == first["url"].encode()
+    assert next((tmp_path / "images").glob(first["image_sha256"] + ".*")).read_bytes() == first["url"].encode()
 
 
 def test_two_clients_at_the_same_time_each_get_complete_results(tmp_path):
     broker = InMemoryBroker()
-    gateway = Gateway(1, broker, "127.0.0.1", 0)
+    gateway = Gateway(1, broker, "127.0.0.1", 0, epoch=0)
     port = gateway.start()
     seen = []
     # el pipeline falso atiende a los dos clientes, uno tras otro, al llegar sus EOF

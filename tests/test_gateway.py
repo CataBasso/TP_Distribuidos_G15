@@ -247,3 +247,22 @@ def test_disconnect_discards_the_eof_state(gw_pk):
     broker.get_abort()
     time.sleep(0.2)
     assert gateway.tracker.pending(cid)[1] == (0, 1)      # se olvidó todo de ese cliente
+
+
+def test_client_ids_do_not_collide_after_gateway_restart():
+    import time
+    from gateway.gateway import Gateway
+    g1 = Gateway(1, InMemoryBroker(), "127.0.0.1", 0, epoch=1000)
+    g2 = Gateway(1, InMemoryBroker(), "127.0.0.1", 0, epoch=1001)     # "reinicio" un segundo después
+    a = [next(g1._next_n) for _ in range(3)]
+    b = [next(g2._next_n) for _ in range(3)]
+    assert max(a) < min(b) and len(set(a + b)) == 6
+    assert max(b) < 2**63
+
+
+def test_bounded_set_forgets_oldest_only():
+    from common.bounded_set import BoundedSet
+    s = BoundedSet(3)
+    for i in range(5):
+        s.add(i)
+    assert 0 not in s and 1 not in s and all(i in s for i in (2, 3, 4)) and len(s) == 3

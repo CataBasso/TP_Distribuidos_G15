@@ -40,11 +40,16 @@ def compose_clients(compose="docker-compose.yaml"):
 def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument("--wait", action="store_true")
+    p.add_argument("--list-clients", action="store_true",
+                   help="imprime los client_* del compose (los usa el Makefile) y termina")
     p.add_argument("--output", default="output")
     p.add_argument("--expected", default="data/expected/small")
     p.add_argument("--compose", default="docker-compose.yaml")
     a = p.parse_args(argv)
     clients = compose_clients(a.compose)
+    if a.list_clients:
+        print(" ".join(clients))
+        return 0
     if a.wait:
         res = subprocess.run(["docker", "container", "wait"] + clients, capture_output=True, text=True)
         codes = res.stdout.split()

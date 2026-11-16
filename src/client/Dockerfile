@@ -1,6 +1,6 @@
-FROM python:3-slim
+FROM tpdist/base:latest
 
-RUN pip3 install pika pyarrow
+RUN pip3 install --no-cache-dir pyarrow
 
 COPY common ./common
 COPY client ./client

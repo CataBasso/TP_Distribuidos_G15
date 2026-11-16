@@ -1,0 +1,5 @@
+# Imagen base compartida por todas las etapas (se construye UNA vez: `make build`).
+# slim (glibc) en vez de alpine (musl): permite devolver memoria al SO con malloc_trim
+# (ver common/memory.py) y unifica el comportamiento de todas las imágenes.
+FROM python:3.13-slim
+RUN pip3 install --no-cache-dir pika

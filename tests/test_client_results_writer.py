@@ -10,6 +10,12 @@ def read(path):
         return list(csv.reader(f))
 
 
+def _image_file(root, digest):
+    """images/<sha256><ext>: la extensión depende del contenido."""
+    (f,) = (root / "images").glob(digest + ".*")
+    return f
+
+
 def test_creates_all_files_with_headers_even_without_results(tmp_path):
     ResultWriter(tmp_path).close()
     assert read(tmp_path / "output_query_1.csv") == [["date_modified", "url"]]
@@ -53,7 +59,7 @@ def test_query2_saves_image_and_writes_its_sha256(tmp_path):
     w.close()
     rows = read(tmp_path / "output_query_2.csv")
     assert rows[1] == ["Ada", "u", digest] and rows[2] == ["Sin imagen", "v", ""]
-    assert (tmp_path / "images" / digest).read_bytes() == content
+    assert _image_file(tmp_path, digest).read_bytes() == content
 
 
 def test_query2_accepts_image_as_raw_bytes(tmp_path):
@@ -63,7 +69,7 @@ def test_query2_accepts_image_as_raw_bytes(tmp_path):
     w.handle({"query": 2, "rows": [{"name": "Ada", "url": "u", "image": content}]})
     w.close()
     assert read(tmp_path / "output_query_2.csv")[1] == ["Ada", "u", digest]
-    assert (tmp_path / "images" / digest).read_bytes() == content
+    assert _image_file(tmp_path, digest).read_bytes() == content
 
 
 def test_unknown_query_is_rejected(tmp_path):
@@ -72,3 +78,22 @@ def test_unknown_query_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         w.handle({"query": 9, "rows": []})
     w.close()
+
+
+def test_image_extension_from_magic_bytes():
+    from client.results_writer import image_extension
+    assert image_extension(b"\x89PNG\r\n\x1a\n....") == ".png"
+    assert image_extension(b"\xff\xd8\xff\xe0....") == ".jpg"
+    assert image_extension(b"GIF89a...") == ".gif"
+    assert image_extension(b"RIFF\x00\x00\x00\x00WEBPVP8 ") == ".webp"
+    assert image_extension(b'<?xml version="1.0"?><svg xmlns="x"></svg>') == ".svg"
+    assert image_extension(b"<html>error 429</html>") == ".bin"     # "basura": no es imagen
+
+
+def test_query2_file_gets_extension_of_its_content(tmp_path):
+    png = b"\x89PNG\r\n\x1a\nrest"
+    w = ResultWriter(tmp_path)
+    w.handle({"query": 2, "rows": [{"name": "Ada", "url": "u", "image": png}]})
+    w.close()
+    digest = hashlib.sha256(png).hexdigest()
+    assert (tmp_path / "images" / (digest + ".png")).read_bytes() == png

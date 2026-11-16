@@ -1,10 +1,17 @@
 import logging
 import os
-from enum import StrEnum
+from enum import Enum
 from itertools import zip_longest
 
 
-class LogResult(StrEnum):
+class LogResult(str, Enum):
+    """Equivale a StrEnum (que existe recién desde Python 3.11): se imprime como su valor."""
+    def __str__(self):
+        return self.value
+
+    def __format__(self, spec):
+        return str.__format__(self.value, spec)
+
     in_progress = "in-progress"
     fail = "fail"
     success = "success"

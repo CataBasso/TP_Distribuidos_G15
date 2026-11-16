@@ -1,5 +1,50 @@
 # TP Distribuidos – Grupo 15
 
+## Cómo correr el sistema (resumen)
+
+Requisitos: Docker con el plugin `docker compose` (y tu usuario en el grupo `docker`), `make` y
+Python 3 en la máquina. Los datos van en `data/sample/<small|medium|large>_dataset/` (sólo `small`
+viene en el repo) y lo esperado en `data/expected/<small|medium|large>/`.
+
+    make switch SIZE=medium N=6   # 1) elige tamaño de dataset y escenario de réplicas (genera docker-compose.yaml)
+    make build                    # 2) construye las imágenes (una por tipo de etapa; sólo hace falta si cambió el código)
+    make system-up                # 3) levanta RabbitMQ + Gateways + etapas y las deja corriendo, sin clientes
+    make run-clients              # 4) INICIA EL PROCESAMIENTO: vacía output/ y arranca los client_*
+    make verify SIZE=medium       # 5) espera a los clientes y compara output/ con data/expected/medium
+    make system-down              # 6) baja todo (también borra el volumen de la caché de imágenes)
+
+- `SIZE` (small por defecto) tiene que ser el mismo en `make switch` y en `make verify`.
+- `N` es el escenario (1..7, ver "Escenarios de réplicas"). Para limitar la CPU de RabbitMQ:
+  `make switch SIZE=medium N=6 RABBIT_CPUS=1.0` (2.0 por defecto).
+- Un solo comando para todo el ciclo: `make test-scenario SIZE=medium` (build, levantar, clientes,
+  verificar y guardar logs en `logs/`). Deja el sistema corriendo; con `KEEP=0` lo baja al final.
+- Un cliente más contra el sistema que sigue arriba: `make new-client C=client_0` (siempre con `C=`;
+  sin eso se recrea todo el sistema). Después, `make verify`.
+- `output/` lo vacía `make run-clients` (y `make test-scenario`) al empezar; `make system-down` no lo toca.
+- Cada cliente escribe en `output/client_<i>/` (CSV de las 5 queries y `images/<sha256><ext>`).
+- Los comandos `make run-clients` y `make new-client` son los que envían datos; `make verify` sólo
+  espera y compara.
+
+Herramientas para revisar una corrida:
+
+    python3 tools/check_images.py              # que cada imagen del CSV exista, tenga extensión y no esté vacía
+    sh tools/queue_depths.sh                   # mensajes por cola y CPU/memoria por contenedor (correrlo DURANTE la corrida: watch -n2 sh tools/queue_depths.sh)
+    PYTHONPATH=src python3 tools/profile_year_in.py 200 1500   # costo de CPU por batch en el Gateway y en YearFilter
+
+Variables útiles del cliente (por `docker compose --profile clients run --rm -e ... client_0` o
+por argumentos): `BATCH_ROWS` (200), `BATCH_BYTES` (1 MiB), `PARQUET_READ_CHUNK` (200). De las etapas:
+`PREFETCH` (10) para el prefetch de RabbitMQ, `IMAGE_CACHE_DIR` para la caché de imágenes.
+
+Sin Docker (rápido, RabbitMQ falso): `make setup` y después `make test-scenarios`
+(o `.venv/bin/pytest -q --ignore=tests/test_gateway_rabbit.py --ignore=tests/test_middleware.py --ignore=tests/test_querys.py`).
+
+Notas:
+- Todas las etapas parten de la imagen `tpdist/base` (`src/Dockerfile.base`), que fija Python 3.13.
+  La versión importa: el conteo de palabras (Q5) usa `\w` y `lower()`, que dependen de la versión de
+  Unicode de Python. Con otra versión algunos artículos de `large` cambian de conteo.
+- Las imágenes se construyen una vez por tipo de etapa y las réplicas la comparten.
+
+
 ## Client y Gateway
 
 Cómo correrlos (con RabbitMQ levantado: `make rabbit-up`):
@@ -30,25 +75,22 @@ Detalle de la implementación en el documento de explicación entregado junto al
 
     make test
 
-Levanta todo el sistema con Docker Compose (`docker-compose.yaml`), espera a que `client_0`
-termine de enviar `data/sample/medium_dataset` y recibir los resultados en `output/`, corre
-`tests/test_querys.py` (compara contra `data/expected/medium`) y baja el sistema, sin
-importar si los tests pasaron o fallaron. El código de salida es el de pytest.
-`output/` se vacía al empezar.
+Construye, levanta todo el sistema con Docker Compose (`docker-compose.yaml`), espera a que `client_0`
+termine de enviar y recibir los resultados en `output/` y corre `tests/test_querys.py`
+(compara contra `data/expected/$(SIZE)`). El código de salida es el de pytest. `output/` se vacía al
+empezar. El sistema queda corriendo; con `make test KEEP=0` se baja al final.
 
 Para una sola query, con el sistema ya corrido y `output/` completo: `make test-query1` … `make test-query5`.
 
 ## Levantar y bajar el sistema
 
-    make up      # construye las imágenes y levanta todo; luego sigue los logs
-    make down    # detiene y elimina los contenedores
+    make build         # imágenes (base + una por tipo de etapa), con caché de capas
+    make system-up     # levanta el sistema sin clientes y espera a que estén healthy
+    make run-clients   # arranca los clientes y empieza el procesamiento
+    make system-down   # detiene y elimina contenedores, red y volúmenes
 
-`make up` crea `output/` si no existe, corre `docker compose up --build --remove-orphans --detach`
-sobre `docker-compose.yaml` y deja corriendo `docker compose logs --follow` con los logs de todas
-las réplicas. Ctrl+C corta los logs pero **no** baja el sistema. `client_0` envía
-`data/sample/medium_dataset` y escribe los resultados en `output/`.
-
-`make down` hace `stop -t 5` y `down`. Para ver los logs sin seguirlos: `make logs`.
+`make up` hace `build`, `system-up` y `run-clients` y sigue los logs (Ctrl+C corta los logs pero no
+baja el sistema). `make down` equivale a `make system-down`. Logs sin seguir: `make logs`.
 
 ## LengthMapper, AvgReducer, Q5Filter y cierre de resultados (tareas 7 y 8)
 
@@ -102,9 +144,11 @@ Sin Docker (RabbitMQ falso, Wikimedia simulada):
 
 Con Docker (como `make switch` / `make test` de tp-coordinacion):
 
-    make switch N=4          # genera scenarios/*.yaml y copia el 4 a docker-compose.yaml
-    make test-scenario       # up --build, espera a los client_*, compara output/client_<i> y baja todo
-    make test-scenario SIZE=medium    # con medium_dataset / data/expected/medium
+    make switch N=4                   # genera scenarios/*.yaml y copia el 4 a docker-compose.yaml
+    make test-scenario                # build, levanta, corre los client_*, compara output/client_<i> (queda corriendo)
+    make test-scenario KEEP=0         # igual, pero baja todo al final
+    make switch SIZE=medium N=6 && make test-scenario SIZE=medium    # con medium_dataset / data/expected/medium
+    make test-all-scenarios SIZE=small  # todos los escenarios fijos, uno tras otro, bajando cada uno
 
 Cada cliente escribe en `output/client_<i>/` y se compara contra `data/expected/<size>/`.
 Para otra combinación a mano: agregar una entrada a `SCENARIOS` en `tools/scenarios.py`.

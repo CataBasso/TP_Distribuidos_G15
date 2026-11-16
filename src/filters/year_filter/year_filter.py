@@ -1,3 +1,4 @@
+from common.bounded_set import BoundedSet
 import os
 import logging
 import signal
@@ -35,8 +36,8 @@ class YearFilter:
         self.eof_total = {}    # client_id -> total de batches (cuando se conoce)
         self.reported = {}     # client_id -> {replica: batches procesados}
         self.holds_eof = set() # clientes cuyo EOF consumió esta réplica
-        self.done = set()
-        self.aborted = set()
+        self.done = BoundedSet()
+        self.aborted = BoundedSet()
 
     def on_data(self, body, ack, nack):
         message = internal.deserialize(body)

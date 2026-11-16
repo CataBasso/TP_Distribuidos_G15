@@ -84,144 +84,200 @@ def _pack_length(length):
     return serialize_uint32(length)
 
 
-def _serialize_value(value, depth):
+
+_ST_BYTE_LEN = struct.Struct(">BI")      
+_ST_INT = struct.Struct(">Bq")
+_ST_FLOAT = struct.Struct(">Bd")
+_ST_U32 = struct.Struct(">I")
+_NULL_B = bytes([_NULL])
+_TRUE_B = bytes([_BOOL, 1])
+_FALSE_B = bytes([_BOOL, 0])
+_KEY_CACHE = {}                          
+_KEY_CACHE_MAX = 4096
+_KEY_DECODE = {}                          
+
+
+def _ser(value, depth, out):
     if depth > MAX_NESTING:
         raise ValueError("estructura demasiado anidada")
-
-    if value is None:
-        return bytes([_NULL])
-
-    if isinstance(value, bool):
-        return bytes([_BOOL]) + serialize_bool(value)
-
-    if isinstance(value, int):
-        return bytes([_INT]) + serialize_int64(value)
-
-    if isinstance(value, float):
-        return bytes([_FLOAT]) + struct.pack(">d", value)
-
-    if isinstance(value, str):
-        data = serialize_string(value)
+    t = type(value)
+    if t is str:
+        data = value.encode("utf-8")
         if len(data) > MAX_VALUE_SIZE:
             raise ValueError("string demasiado grande")
-        return bytes([_STRING]) + _pack_length(len(data)) + data
-
-    if isinstance(value, bytes):
-        if len(value) > MAX_VALUE_SIZE:
-            raise ValueError("bloque de bytes demasiado grande")
-        return bytes([_BYTES]) + _pack_length(len(value)) + value
-
-    if isinstance(value, (list, tuple)):
-        if len(value) > MAX_COLLECTION_SIZE:
-            raise ValueError("colección demasiado grande")
-
-        tag = _LIST if isinstance(value, list) else _TUPLE
-        parts = [bytes([tag]), _pack_length(len(value))]
-        parts.extend(_serialize_value(item, depth + 1) for item in value)
-        return b"".join(parts)
-
-    if isinstance(value, dict):
+        out.append(_ST_BYTE_LEN.pack(_STRING, len(data)))
+        out.append(data)
+    elif t is dict:
         if len(value) > MAX_COLLECTION_SIZE:
             raise ValueError("diccionario demasiado grande")
-
-        parts = [bytes([_DICT]), _pack_length(len(value))]
+        out.append(_ST_BYTE_LEN.pack(_DICT, len(value)))
+        cache = _KEY_CACHE
         for key, item in value.items():
-            if not isinstance(key, str):
+            if type(key) is not str:
                 raise ValueError("las claves deben ser strings")
-            parts.append(_serialize_value(key, depth + 1))
-            parts.append(_serialize_value(item, depth + 1))
-        return b"".join(parts)
+            kb = cache.get(key)
+            if kb is None:
+                raw = key.encode("utf-8")
+                kb = _ST_BYTE_LEN.pack(_STRING, len(raw)) + raw
+                if len(cache) < _KEY_CACHE_MAX:
+                    cache[key] = kb
+            out.append(kb)
+            _ser(item, depth + 1, out)
+    elif value is None:
+        out.append(_NULL_B)
+    elif t is int:
+        try:
+            out.append(_ST_INT.pack(_INT, value))
+        except struct.error as exc:
+            raise ValueError("int64 fuera de rango") from exc
+    elif t is bool:
+        out.append(_TRUE_B if value else _FALSE_B)
+    elif t is list or t is tuple:
+        if len(value) > MAX_COLLECTION_SIZE:
+            raise ValueError("colección demasiado grande")
+        out.append(_ST_BYTE_LEN.pack(_LIST if t is list else _TUPLE, len(value)))
+        for item in value:
+            _ser(item, depth + 1, out)
+    elif t is float:
+        out.append(_ST_FLOAT.pack(_FLOAT, value))
+    elif t is bytes:
+        if len(value) > MAX_VALUE_SIZE:
+            raise ValueError("bloque de bytes demasiado grande")
+        out.append(_ST_BYTE_LEN.pack(_BYTES, len(value)))
+        out.append(value)
+    elif isinstance(value, (bool, int, float, str, bytes, list, tuple, dict)):
+        # subclases (p. ej. IntEnum, namedtuple): mismo resultado que la versión original
+        _ser_subclass(value, depth, out)
+    else:
+        raise ValueError(f"tipo no soportado: {type(value).__name__}")
 
-    raise ValueError(f"tipo no soportado: {type(value).__name__}")
+
+def _ser_subclass(value, depth, out):
+    if isinstance(value, bool):
+        value = bool(value)
+    elif isinstance(value, int):
+        value = int(value)
+    elif isinstance(value, float):
+        value = float(value)
+    elif isinstance(value, str):
+        value = str(value)
+    elif isinstance(value, bytes):
+        value = bytes(value)
+    elif isinstance(value, tuple):
+        value = tuple(value)
+    elif isinstance(value, list):
+        value = list(value)
+    else:
+        value = dict(value)
+    _ser(value, depth, out)
 
 
 def serialize_value(value):
-    data = _serialize_value(value, 0)
+    out = []
+    _ser(value, 0, out)
+    data = b"".join(out)
     if len(data) > MAX_VALUE_SIZE:
         raise ValueError("valor serializado demasiado grande")
     return data
 
 
-def _read_exact(data, offset, size):
-    end = offset + size
-    if end > len(data):
-        raise ValueError("valor truncado")
-    return data[offset:end], end
-
-
-def _read_length(data, offset):
-    raw, offset = _read_exact(data, offset, UINT32_SIZE)
-    length = deserialize_uint32(raw)
-    if length > MAX_VALUE_SIZE:
-        raise ValueError("longitud demasiado grande")
-    return length, offset
-
-
-def _deserialize_value(data, offset, depth):
+def _de(data, offset, depth):
     if depth > MAX_NESTING:
         raise ValueError("estructura demasiado anidada")
+    try:
+        tag = data[offset]
+    except IndexError:
+        raise ValueError("valor truncado") from None
+    offset += 1
 
-    raw_tag, offset = _read_exact(data, offset, 1)
-    tag = raw_tag[0]
+    if tag == _STRING or tag == _BYTES:
+        if offset + 4 > len(data):
+            raise ValueError("valor truncado")
+        length = _ST_U32.unpack_from(data, offset)[0]
+        if length > MAX_VALUE_SIZE:
+            raise ValueError("longitud demasiado grande")
+        offset += 4
+        end = offset + length
+        if end > len(data):
+            raise ValueError("valor truncado")
+        raw = data[offset:end]
+        return (raw.decode("utf-8") if tag == _STRING else raw), end
+
+    if tag == _DICT:
+        if offset + 4 > len(data):
+            raise ValueError("valor truncado")
+        count = _ST_U32.unpack_from(data, offset)[0]
+        if count > MAX_COLLECTION_SIZE:
+            raise ValueError("diccionario demasiado grande")
+        offset += 4
+        result = {}
+        kcache = _KEY_DECODE
+        n = len(data)
+        for _ in range(count):
+            if offset >= n:
+                raise ValueError("valor truncado")
+            if data[offset] != _STRING:
+                _, offset = _de(data, offset, depth + 1)      # mismo error que antes si no es str
+                raise ValueError("clave de diccionario inválida")
+            if offset + 5 > n:
+                raise ValueError("valor truncado")
+            klen = _ST_U32.unpack_from(data, offset + 1)[0]
+            kend = offset + 5 + klen
+            if kend > n:
+                raise ValueError("valor truncado")
+            raw = data[offset + 5:kend]
+            key = kcache.get(raw)
+            if key is None:
+                key = raw.decode("utf-8")
+                if len(kcache) < _KEY_CACHE_MAX:
+                    kcache[raw] = key
+            if key in result:
+                raise ValueError("clave duplicada")
+            result[key], offset = _de(data, kend, depth + 1)
+        return result, offset
+
+    if tag == _LIST or tag == _TUPLE:
+        if offset + 4 > len(data):
+            raise ValueError("valor truncado")
+        count = _ST_U32.unpack_from(data, offset)[0]
+        if count > MAX_VALUE_SIZE:
+            raise ValueError("longitud demasiado grande")
+        if count > MAX_COLLECTION_SIZE:
+            raise ValueError("colección demasiado grande")
+        offset += 4
+        values = []
+        append = values.append
+        for _ in range(count):
+            item, offset = _de(data, offset, depth + 1)
+            append(item)
+        return (tuple(values) if tag == _TUPLE else values), offset
 
     if tag == _NULL:
         return None, offset
 
-    if tag == _BOOL:
-        raw, offset = _read_exact(data, offset, BOOL_SIZE)
-        return deserialize_bool(raw), offset
-
     if tag == _INT:
-        raw, offset = _read_exact(data, offset, INT64_SIZE)
-        return deserialize_int64(raw), offset
+        if offset + 8 > len(data):
+            raise ValueError("valor truncado")
+        return int.from_bytes(data[offset:offset + 8], "big", signed=True), offset + 8
+
+    if tag == _BOOL:
+        if offset + 1 > len(data):
+            raise ValueError("valor truncado")
+        b = data[offset]
+        if b not in (0, 1):
+            raise ValueError("booleano inválido")
+        return bool(b), offset + 1
 
     if tag == _FLOAT:
-        raw, offset = _read_exact(data, offset, FLOAT64_SIZE)
-        return struct.unpack(">d", raw)[0], offset
-
-    if tag in (_STRING, _BYTES):
-        length, offset = _read_length(data, offset)
-        raw, offset = _read_exact(data, offset, length)
-        if tag == _STRING:
-            return deserialize_string(raw), offset
-        return raw, offset
-
-    if tag in (_LIST, _TUPLE):
-        count, offset = _read_length(data, offset)
-        if count > MAX_COLLECTION_SIZE:
-            raise ValueError("colección demasiado grande")
-
-        values = []
-        for _ in range(count):
-            value, offset = _deserialize_value(data, offset, depth + 1)
-            values.append(value)
-
-        if tag == _TUPLE:
-            return tuple(values), offset
-        return values, offset
-
-    if tag == _DICT:
-        count, offset = _read_length(data, offset)
-        if count > MAX_COLLECTION_SIZE:
-            raise ValueError("diccionario demasiado grande")
-
-        result = {}
-        for _ in range(count):
-            key, offset = _deserialize_value(data, offset, depth + 1)
-            if not isinstance(key, str):
-                raise ValueError("clave de diccionario inválida")
-            if key in result:
-                raise ValueError("clave duplicada")
-            value, offset = _deserialize_value(data, offset, depth + 1)
-            result[key] = value
-
-        return result, offset
+        if offset + 8 > len(data):
+            raise ValueError("valor truncado")
+        return struct.unpack_from(">d", data, offset)[0], offset + 8
 
     raise ValueError(f"etiqueta de tipo desconocida: {tag}")
 
 
 def deserialize_value(data):
-    value, offset = _deserialize_value(data, 0, 0)
+    value, offset = _de(data, 0, 0)
     if offset != len(data):
         raise ValueError("sobran bytes al final del valor")
     return value

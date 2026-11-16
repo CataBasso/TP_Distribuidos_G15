@@ -1,4 +1,6 @@
 import itertools
+import os
+import time
 from logging import log
 import socket
 import threading
@@ -20,7 +22,7 @@ _BATCH, _EOF, _RESULT, _DONE = (TYPE_NAMES[t] for t in (BATCH, EOF, RESULT, DONE
 
 class Gateway:
     def __init__(self, gw_id: int, broker, host: str = "0.0.0.0", port: int = 5000,
-                 expected_eofs: dict = None):
+                 expected_eofs: dict = None, epoch: int = None):
         self.gw_id = gw_id
         self.broker = broker
         self.tracker = ResultTracker(expected_eofs or expected_result_eofs(1, 1))
@@ -28,7 +30,12 @@ class Gateway:
         self._server = None
         self._sessions: dict[int, ClientSession] = {}
         self._sessions_lock = threading.Lock()
-        self._next_n = itertools.count(1)
+        # n = (segundos desde epoch << 20) | secuencia. Si el Gateway se reinicia, los n nuevos son
+        # siempre mayores que los anteriores: no hay colisión con los `done`/`aborted` de las etapas.
+        # (hasta 2^20 clientes por segundo; cabe en int64 hasta el año ~4000)
+        if epoch is None:
+            epoch = int(os.environ.get("GATEWAY_EPOCH", time.time()))
+        self._next_n = itertools.count((epoch << 20) | 1)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
 

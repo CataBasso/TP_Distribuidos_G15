@@ -1,10 +1,12 @@
-# Generado por tools/scenarios.py -- clients=4 gw=2 year=1 q1=1 q2=1 img=1 ac=1 lm=1 wm=1 P=1 A=1 K=1
+# Generado por tools/scenarios.py -- clients=3 gw=4 year=4 q1=4 q2=4 img=4 ac=4 lm=3 wm=4 P=4 A=4 K=4
 services:
   rabbitmq:
+    image: tpdist/rabbitmq:latest
     build:
       context: ./src/rabbitmq
       dockerfile: Dockerfile
     container_name: rabbitmq
+    cpus: "2.0"
     environment:
     - RABBITMQ_LOG_LEVELS=error
     healthcheck:
@@ -17,6 +19,7 @@ services:
     - 5672:5672
     - 15672:15672
   gateway_0:
+    image: tpdist/gateway:latest
     build:
       context: ./src/
       dockerfile: gateway/Dockerfile
@@ -28,13 +31,12 @@ services:
     - GATEWAY_ID=1
     - GATEWAY_PORT=5000
     - RABBIT_HOST=rabbitmq
-    - WORD_PARTITIONS=1
-    - Q5_PARTITIONS=1
+    - WORD_PARTITIONS=4
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   gateway_1:
-    build:
-      context: ./src/
-      dockerfile: gateway/Dockerfile
+    image: tpdist/gateway:latest
+    pull_policy: never
     container_name: gateway_1
     depends_on:
       rabbitmq:
@@ -43,10 +45,39 @@ services:
     - GATEWAY_ID=2
     - GATEWAY_PORT=5000
     - RABBIT_HOST=rabbitmq
-    - WORD_PARTITIONS=1
-    - Q5_PARTITIONS=1
+    - WORD_PARTITIONS=4
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  gateway_2:
+    image: tpdist/gateway:latest
+    pull_policy: never
+    container_name: gateway_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - GATEWAY_ID=3
+    - GATEWAY_PORT=5000
+    - RABBIT_HOST=rabbitmq
+    - WORD_PARTITIONS=4
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  gateway_3:
+    image: tpdist/gateway:latest
+    pull_policy: never
+    container_name: gateway_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - GATEWAY_ID=4
+    - GATEWAY_PORT=5000
+    - RABBIT_HOST=rabbitmq
+    - WORD_PARTITIONS=4
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   year_filter_0:
+    image: tpdist/year_filter:latest
     build:
       context: ./src/
       dockerfile: filters/year_filter/Dockerfile
@@ -62,7 +93,53 @@ services:
     - Q2_QUEUE=q2_in
     - NORM_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+  year_filter_1:
+    image: tpdist/year_filter:latest
+    pull_policy: never
+    container_name: year_filter_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=year_in
+    - Q1_QUEUE=q1_in
+    - Q2_QUEUE=q2_in
+    - NORM_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
+  year_filter_2:
+    image: tpdist/year_filter:latest
+    pull_policy: never
+    container_name: year_filter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=year_in
+    - Q1_QUEUE=q1_in
+    - Q2_QUEUE=q2_in
+    - NORM_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
+  year_filter_3:
+    image: tpdist/year_filter:latest
+    pull_policy: never
+    container_name: year_filter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=year_in
+    - Q1_QUEUE=q1_in
+    - Q2_QUEUE=q2_in
+    - NORM_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
   q1_filter_0:
+    image: tpdist/q1_filter:latest
     build:
       context: ./src/
       dockerfile: filters/q1_filter/Dockerfile
@@ -75,7 +152,44 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=q1_in
     - PYTHONUNBUFFERED=1
+  q1_filter_1:
+    image: tpdist/q1_filter:latest
+    pull_policy: never
+    container_name: q1_filter_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q1_in
+    - PYTHONUNBUFFERED=1
+  q1_filter_2:
+    image: tpdist/q1_filter:latest
+    pull_policy: never
+    container_name: q1_filter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q1_in
+    - PYTHONUNBUFFERED=1
+  q1_filter_3:
+    image: tpdist/q1_filter:latest
+    pull_policy: never
+    container_name: q1_filter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q1_in
+    - PYTHONUNBUFFERED=1
   q2_filter_0:
+    image: tpdist/q2_filter:latest
     build:
       context: ./src/
       dockerfile: filters/q2_filter/Dockerfile
@@ -89,7 +203,47 @@ services:
     - INPUT_QUEUE=q2_in
     - OUTPUT_QUEUE=img_in
     - PYTHONUNBUFFERED=1
+  q2_filter_1:
+    image: tpdist/q2_filter:latest
+    pull_policy: never
+    container_name: q2_filter_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q2_in
+    - OUTPUT_QUEUE=img_in
+    - PYTHONUNBUFFERED=1
+  q2_filter_2:
+    image: tpdist/q2_filter:latest
+    pull_policy: never
+    container_name: q2_filter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q2_in
+    - OUTPUT_QUEUE=img_in
+    - PYTHONUNBUFFERED=1
+  q2_filter_3:
+    image: tpdist/q2_filter:latest
+    pull_policy: never
+    container_name: q2_filter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q2_in
+    - OUTPUT_QUEUE=img_in
+    - PYTHONUNBUFFERED=1
   image_getter_0:
+    image: tpdist/image_getter:latest
     build:
       context: ./src/
       dockerfile: image/Dockerfile
@@ -101,8 +255,57 @@ services:
     - ID=0
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=img_in
+    - IMAGE_CACHE_DIR=/cache
     - PYTHONUNBUFFERED=1
+    volumes:
+    - image_cache:/cache
+  image_getter_1:
+    image: tpdist/image_getter:latest
+    pull_policy: never
+    container_name: image_getter_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=img_in
+    - IMAGE_CACHE_DIR=/cache
+    - PYTHONUNBUFFERED=1
+    volumes:
+    - image_cache:/cache
+  image_getter_2:
+    image: tpdist/image_getter:latest
+    pull_policy: never
+    container_name: image_getter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=img_in
+    - IMAGE_CACHE_DIR=/cache
+    - PYTHONUNBUFFERED=1
+    volumes:
+    - image_cache:/cache
+  image_getter_3:
+    image: tpdist/image_getter:latest
+    pull_policy: never
+    container_name: image_getter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=img_in
+    - IMAGE_CACHE_DIR=/cache
+    - PYTHONUNBUFFERED=1
+    volumes:
+    - image_cache:/cache
   abstract_cleaner_0:
+    image: tpdist/abstract_cleaner:latest
     build:
       context: ./src/
       dockerfile: text_processing/abstract_cleaner/Dockerfile
@@ -115,7 +318,44 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+  abstract_cleaner_1:
+    image: tpdist/abstract_cleaner:latest
+    pull_policy: never
+    container_name: abstract_cleaner_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
+  abstract_cleaner_2:
+    image: tpdist/abstract_cleaner:latest
+    pull_policy: never
+    container_name: abstract_cleaner_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
+  abstract_cleaner_3:
+    image: tpdist/abstract_cleaner:latest
+    pull_policy: never
+    container_name: abstract_cleaner_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
   length_mapper_0:
+    image: tpdist/length_mapper:latest
     build:
       context: ./src/
       dockerfile: text_processing/length_mapper/Dockerfile
@@ -126,11 +366,40 @@ services:
     environment:
     - ID=0
     - MOM_HOST=rabbitmq
-    - CLEANER_REPLICAS=1
-    - AVG_PARTITIONS=1
-    - Q5_PARTITIONS=1
+    - CLEANER_REPLICAS=4
+    - AVG_PARTITIONS=4
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  length_mapper_1:
+    image: tpdist/length_mapper:latest
+    pull_policy: never
+    container_name: length_mapper_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=4
+    - AVG_PARTITIONS=4
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  length_mapper_2:
+    image: tpdist/length_mapper:latest
+    pull_policy: never
+    container_name: length_mapper_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=4
+    - AVG_PARTITIONS=4
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   avg_reducer_0:
+    image: tpdist/avg_reducer:latest
     build:
       context: ./src/
       dockerfile: text_processing/avg_reducer/Dockerfile
@@ -141,10 +410,50 @@ services:
     environment:
     - ID=0
     - MOM_HOST=rabbitmq
-    - LM_REPLICAS=1
-    - Q5_PARTITIONS=1
+    - LM_REPLICAS=3
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  avg_reducer_1:
+    image: tpdist/avg_reducer:latest
+    pull_policy: never
+    container_name: avg_reducer_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  avg_reducer_2:
+    image: tpdist/avg_reducer:latest
+    pull_policy: never
+    container_name: avg_reducer_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  avg_reducer_3:
+    image: tpdist/avg_reducer:latest
+    pull_policy: never
+    container_name: avg_reducer_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   q5_filter_0:
+    image: tpdist/q5_filter:latest
     build:
       context: ./src/
       dockerfile: filters/q5_filter/Dockerfile
@@ -155,9 +464,46 @@ services:
     environment:
     - ID=0
     - MOM_HOST=rabbitmq
-    - LM_REPLICAS=1
+    - LM_REPLICAS=3
+    - PYTHONUNBUFFERED=1
+  q5_filter_1:
+    image: tpdist/q5_filter:latest
+    pull_policy: never
+    container_name: q5_filter_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
+    - PYTHONUNBUFFERED=1
+  q5_filter_2:
+    image: tpdist/q5_filter:latest
+    pull_policy: never
+    container_name: q5_filter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
+    - PYTHONUNBUFFERED=1
+  q5_filter_3:
+    image: tpdist/q5_filter:latest
+    pull_policy: never
+    container_name: q5_filter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
     - PYTHONUNBUFFERED=1
   word_mapper_0:
+    image: tpdist/word_mapper:latest
     build:
       context: ./src/
       dockerfile: text_processing/word_mapper/Dockerfile
@@ -168,10 +514,50 @@ services:
     environment:
     - ID=0
     - MOM_HOST=rabbitmq
-    - CLEANER_REPLICAS=1
-    - WORD_PARTITIONS=1
+    - CLEANER_REPLICAS=4
+    - WORD_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  word_mapper_1:
+    image: tpdist/word_mapper:latest
+    pull_policy: never
+    container_name: word_mapper_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=4
+    - WORD_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  word_mapper_2:
+    image: tpdist/word_mapper:latest
+    pull_policy: never
+    container_name: word_mapper_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=4
+    - WORD_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  word_mapper_3:
+    image: tpdist/word_mapper:latest
+    pull_policy: never
+    container_name: word_mapper_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=4
+    - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   word_reducer_0:
+    image: tpdist/word_reducer:latest
     build:
       context: ./src/
       dockerfile: text_processing/word_reducer/Dockerfile
@@ -182,9 +568,46 @@ services:
     environment:
     - ID=0
     - MOM_HOST=rabbitmq
-    - WM_REPLICAS=1
+    - WM_REPLICAS=4
+    - PYTHONUNBUFFERED=1
+  word_reducer_1:
+    image: tpdist/word_reducer:latest
+    pull_policy: never
+    container_name: word_reducer_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=1
+    - MOM_HOST=rabbitmq
+    - WM_REPLICAS=4
+    - PYTHONUNBUFFERED=1
+  word_reducer_2:
+    image: tpdist/word_reducer:latest
+    pull_policy: never
+    container_name: word_reducer_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - WM_REPLICAS=4
+    - PYTHONUNBUFFERED=1
+  word_reducer_3:
+    image: tpdist/word_reducer:latest
+    pull_policy: never
+    container_name: word_reducer_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - WM_REPLICAS=4
     - PYTHONUNBUFFERED=1
   top_merger:
+    image: tpdist/top_merger:latest
     build:
       context: ./src/
       dockerfile: text_processing/top_merger/Dockerfile
@@ -194,27 +617,20 @@ services:
         condition: service_healthy
     environment:
     - MOM_HOST=rabbitmq
-    - WORD_PARTITIONS=1
+    - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   client_0:
+    image: tpdist/client:latest
     build:
       context: ./src/
       dockerfile: client/Dockerfile
     container_name: client_0
+    profiles: ["clients"]
     depends_on:
     - gateway_0
     - gateway_1
-    - year_filter_0
-    - q1_filter_0
-    - q2_filter_0
-    - image_getter_0
-    - abstract_cleaner_0
-    - length_mapper_0
-    - avg_reducer_0
-    - q5_filter_0
-    - word_mapper_0
-    - word_reducer_0
-    - top_merger
+    - gateway_2
+    - gateway_3
     environment:
     - GATEWAY_HOST=gateway_0
     - GATEWAY_PORT=5000
@@ -222,27 +638,18 @@ services:
     - OUTPUT_DIR=/output/client_0
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/small_dataset:/data:ro
+    - ./data/sample/large_dataset:/data:ro
     - ./output:/output
   client_1:
-    build:
-      context: ./src/
-      dockerfile: client/Dockerfile
+    image: tpdist/client:latest
+    pull_policy: never
     container_name: client_1
+    profiles: ["clients"]
     depends_on:
     - gateway_0
     - gateway_1
-    - year_filter_0
-    - q1_filter_0
-    - q2_filter_0
-    - image_getter_0
-    - abstract_cleaner_0
-    - length_mapper_0
-    - avg_reducer_0
-    - q5_filter_0
-    - word_mapper_0
-    - word_reducer_0
-    - top_merger
+    - gateway_2
+    - gateway_3
     environment:
     - GATEWAY_HOST=gateway_1
     - GATEWAY_PORT=5000
@@ -250,61 +657,26 @@ services:
     - OUTPUT_DIR=/output/client_1
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/small_dataset:/data:ro
+    - ./data/sample/large_dataset:/data:ro
     - ./output:/output
   client_2:
-    build:
-      context: ./src/
-      dockerfile: client/Dockerfile
+    image: tpdist/client:latest
+    pull_policy: never
     container_name: client_2
+    profiles: ["clients"]
     depends_on:
     - gateway_0
     - gateway_1
-    - year_filter_0
-    - q1_filter_0
-    - q2_filter_0
-    - image_getter_0
-    - abstract_cleaner_0
-    - length_mapper_0
-    - avg_reducer_0
-    - q5_filter_0
-    - word_mapper_0
-    - word_reducer_0
-    - top_merger
+    - gateway_2
+    - gateway_3
     environment:
-    - GATEWAY_HOST=gateway_0
+    - GATEWAY_HOST=gateway_2
     - GATEWAY_PORT=5000
     - DATA_DIR=/data
     - OUTPUT_DIR=/output/client_2
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/small_dataset:/data:ro
+    - ./data/sample/large_dataset:/data:ro
     - ./output:/output
-  client_3:
-    build:
-      context: ./src/
-      dockerfile: client/Dockerfile
-    container_name: client_3
-    depends_on:
-    - gateway_0
-    - gateway_1
-    - year_filter_0
-    - q1_filter_0
-    - q2_filter_0
-    - image_getter_0
-    - abstract_cleaner_0
-    - length_mapper_0
-    - avg_reducer_0
-    - q5_filter_0
-    - word_mapper_0
-    - word_reducer_0
-    - top_merger
-    environment:
-    - GATEWAY_HOST=gateway_1
-    - GATEWAY_PORT=5000
-    - DATA_DIR=/data
-    - OUTPUT_DIR=/output/client_3
-    - PYTHONUNBUFFERED=1
-    volumes:
-    - ./data/sample/small_dataset:/data:ro
-    - ./output:/output
+volumes:
+  image_cache:
