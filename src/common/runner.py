@@ -13,6 +13,11 @@ def env_int(name: str, default=None, alt: str = None) -> int:
         return default
     return int(value)
 
+def env_float(name: str) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        raise SystemExit(f"falta la variable de entorno {name}")
+    return float(value)
 
 def env_str(name: str, default: str) -> str:
     return os.environ.get(name, default)
