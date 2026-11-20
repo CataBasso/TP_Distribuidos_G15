@@ -1,4 +1,4 @@
-# Generado por tools/scenarios.py -- clients=3 gw=2 year=2 q1=2 q2=2 img=2 ac=2 lm=3 wm=2 P=2 A=2 K=3
+# Generado por tools/scenarios.py -- clients=3 gw=4 year=4 q1=4 q2=4 img=4 ac=4 lm=3 wm=4 P=4 A=4 K=4
 services:
   rabbitmq:
     image: tpdist/rabbitmq:latest
@@ -31,8 +31,8 @@ services:
     - GATEWAY_ID=1
     - GATEWAY_PORT=5000
     - RABBIT_HOST=rabbitmq
-    - WORD_PARTITIONS=2
-    - Q5_PARTITIONS=3
+    - WORD_PARTITIONS=4
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   gateway_1:
     image: tpdist/gateway:latest
@@ -45,8 +45,36 @@ services:
     - GATEWAY_ID=2
     - GATEWAY_PORT=5000
     - RABBIT_HOST=rabbitmq
-    - WORD_PARTITIONS=2
-    - Q5_PARTITIONS=3
+    - WORD_PARTITIONS=4
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  gateway_2:
+    image: tpdist/gateway:latest
+    pull_policy: never
+    container_name: gateway_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - GATEWAY_ID=3
+    - GATEWAY_PORT=5000
+    - RABBIT_HOST=rabbitmq
+    - WORD_PARTITIONS=4
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  gateway_3:
+    image: tpdist/gateway:latest
+    pull_policy: never
+    container_name: gateway_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - GATEWAY_ID=4
+    - GATEWAY_PORT=5000
+    - RABBIT_HOST=rabbitmq
+    - WORD_PARTITIONS=4
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   year_filter_0:
     image: tpdist/year_filter:latest
@@ -80,6 +108,36 @@ services:
     - Q2_QUEUE=q2_in
     - NORM_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+  year_filter_2:
+    image: tpdist/year_filter:latest
+    pull_policy: never
+    container_name: year_filter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=year_in
+    - Q1_QUEUE=q1_in
+    - Q2_QUEUE=q2_in
+    - NORM_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
+  year_filter_3:
+    image: tpdist/year_filter:latest
+    pull_policy: never
+    container_name: year_filter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=year_in
+    - Q1_QUEUE=q1_in
+    - Q2_QUEUE=q2_in
+    - NORM_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
   q1_filter_0:
     image: tpdist/q1_filter:latest
     build:
@@ -103,6 +161,30 @@ services:
         condition: service_healthy
     environment:
     - ID=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q1_in
+    - PYTHONUNBUFFERED=1
+  q1_filter_2:
+    image: tpdist/q1_filter:latest
+    pull_policy: never
+    container_name: q1_filter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q1_in
+    - PYTHONUNBUFFERED=1
+  q1_filter_3:
+    image: tpdist/q1_filter:latest
+    pull_policy: never
+    container_name: q1_filter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=q1_in
     - PYTHONUNBUFFERED=1
@@ -130,6 +212,32 @@ services:
         condition: service_healthy
     environment:
     - ID=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q2_in
+    - OUTPUT_QUEUE=img_in
+    - PYTHONUNBUFFERED=1
+  q2_filter_2:
+    image: tpdist/q2_filter:latest
+    pull_policy: never
+    container_name: q2_filter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q2_in
+    - OUTPUT_QUEUE=img_in
+    - PYTHONUNBUFFERED=1
+  q2_filter_3:
+    image: tpdist/q2_filter:latest
+    pull_policy: never
+    container_name: q2_filter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=q2_in
     - OUTPUT_QUEUE=img_in
@@ -166,6 +274,36 @@ services:
     - PYTHONUNBUFFERED=1
     volumes:
     - image_cache:/cache
+  image_getter_2:
+    image: tpdist/image_getter:latest
+    pull_policy: never
+    container_name: image_getter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=img_in
+    - IMAGE_CACHE_DIR=/cache
+    - PYTHONUNBUFFERED=1
+    volumes:
+    - image_cache:/cache
+  image_getter_3:
+    image: tpdist/image_getter:latest
+    pull_policy: never
+    container_name: image_getter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=img_in
+    - IMAGE_CACHE_DIR=/cache
+    - PYTHONUNBUFFERED=1
+    volumes:
+    - image_cache:/cache
   abstract_cleaner_0:
     image: tpdist/abstract_cleaner:latest
     build:
@@ -192,6 +330,30 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+  abstract_cleaner_2:
+    image: tpdist/abstract_cleaner:latest
+    pull_policy: never
+    container_name: abstract_cleaner_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
+  abstract_cleaner_3:
+    image: tpdist/abstract_cleaner:latest
+    pull_policy: never
+    container_name: abstract_cleaner_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=norm_in
+    - PYTHONUNBUFFERED=1
   length_mapper_0:
     image: tpdist/length_mapper:latest
     build:
@@ -204,9 +366,9 @@ services:
     environment:
     - ID=0
     - MOM_HOST=rabbitmq
-    - CLEANER_REPLICAS=2
-    - AVG_PARTITIONS=2
-    - Q5_PARTITIONS=3
+    - CLEANER_REPLICAS=4
+    - AVG_PARTITIONS=4
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   length_mapper_1:
     image: tpdist/length_mapper:latest
@@ -218,9 +380,9 @@ services:
     environment:
     - ID=1
     - MOM_HOST=rabbitmq
-    - CLEANER_REPLICAS=2
-    - AVG_PARTITIONS=2
-    - Q5_PARTITIONS=3
+    - CLEANER_REPLICAS=4
+    - AVG_PARTITIONS=4
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   length_mapper_2:
     image: tpdist/length_mapper:latest
@@ -232,9 +394,9 @@ services:
     environment:
     - ID=2
     - MOM_HOST=rabbitmq
-    - CLEANER_REPLICAS=2
-    - AVG_PARTITIONS=2
-    - Q5_PARTITIONS=3
+    - CLEANER_REPLICAS=4
+    - AVG_PARTITIONS=4
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   avg_reducer_0:
     image: tpdist/avg_reducer:latest
@@ -249,7 +411,7 @@ services:
     - ID=0
     - MOM_HOST=rabbitmq
     - LM_REPLICAS=3
-    - Q5_PARTITIONS=3
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   avg_reducer_1:
     image: tpdist/avg_reducer:latest
@@ -262,7 +424,33 @@ services:
     - ID=1
     - MOM_HOST=rabbitmq
     - LM_REPLICAS=3
-    - Q5_PARTITIONS=3
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  avg_reducer_2:
+    image: tpdist/avg_reducer:latest
+    pull_policy: never
+    container_name: avg_reducer_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
+    - Q5_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  avg_reducer_3:
+    image: tpdist/avg_reducer:latest
+    pull_policy: never
+    container_name: avg_reducer_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
+    - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   q5_filter_0:
     image: tpdist/q5_filter:latest
@@ -302,6 +490,18 @@ services:
     - MOM_HOST=rabbitmq
     - LM_REPLICAS=3
     - PYTHONUNBUFFERED=1
+  q5_filter_3:
+    image: tpdist/q5_filter:latest
+    pull_policy: never
+    container_name: q5_filter_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - LM_REPLICAS=3
+    - PYTHONUNBUFFERED=1
   word_mapper_0:
     image: tpdist/word_mapper:latest
     build:
@@ -314,8 +514,8 @@ services:
     environment:
     - ID=0
     - MOM_HOST=rabbitmq
-    - CLEANER_REPLICAS=2
-    - WORD_PARTITIONS=2
+    - CLEANER_REPLICAS=4
+    - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   word_mapper_1:
     image: tpdist/word_mapper:latest
@@ -327,8 +527,34 @@ services:
     environment:
     - ID=1
     - MOM_HOST=rabbitmq
-    - CLEANER_REPLICAS=2
-    - WORD_PARTITIONS=2
+    - CLEANER_REPLICAS=4
+    - WORD_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  word_mapper_2:
+    image: tpdist/word_mapper:latest
+    pull_policy: never
+    container_name: word_mapper_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=4
+    - WORD_PARTITIONS=4
+    - PYTHONUNBUFFERED=1
+  word_mapper_3:
+    image: tpdist/word_mapper:latest
+    pull_policy: never
+    container_name: word_mapper_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - CLEANER_REPLICAS=4
+    - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   word_reducer_0:
     image: tpdist/word_reducer:latest
@@ -342,7 +568,7 @@ services:
     environment:
     - ID=0
     - MOM_HOST=rabbitmq
-    - WM_REPLICAS=2
+    - WM_REPLICAS=4
     - PYTHONUNBUFFERED=1
   word_reducer_1:
     image: tpdist/word_reducer:latest
@@ -354,7 +580,31 @@ services:
     environment:
     - ID=1
     - MOM_HOST=rabbitmq
-    - WM_REPLICAS=2
+    - WM_REPLICAS=4
+    - PYTHONUNBUFFERED=1
+  word_reducer_2:
+    image: tpdist/word_reducer:latest
+    pull_policy: never
+    container_name: word_reducer_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=2
+    - MOM_HOST=rabbitmq
+    - WM_REPLICAS=4
+    - PYTHONUNBUFFERED=1
+  word_reducer_3:
+    image: tpdist/word_reducer:latest
+    pull_policy: never
+    container_name: word_reducer_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - ID=3
+    - MOM_HOST=rabbitmq
+    - WM_REPLICAS=4
     - PYTHONUNBUFFERED=1
   top_merger:
     image: tpdist/top_merger:latest
@@ -367,7 +617,7 @@ services:
         condition: service_healthy
     environment:
     - MOM_HOST=rabbitmq
-    - WORD_PARTITIONS=2
+    - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
   client_0:
     image: tpdist/client:latest
@@ -379,6 +629,8 @@ services:
     depends_on:
     - gateway_0
     - gateway_1
+    - gateway_2
+    - gateway_3
     environment:
     - GATEWAY_HOST=gateway_0
     - GATEWAY_PORT=5000
@@ -396,6 +648,8 @@ services:
     depends_on:
     - gateway_0
     - gateway_1
+    - gateway_2
+    - gateway_3
     environment:
     - GATEWAY_HOST=gateway_1
     - GATEWAY_PORT=5000
@@ -413,8 +667,10 @@ services:
     depends_on:
     - gateway_0
     - gateway_1
+    - gateway_2
+    - gateway_3
     environment:
-    - GATEWAY_HOST=gateway_0
+    - GATEWAY_HOST=gateway_2
     - GATEWAY_PORT=5000
     - DATA_DIR=/data
     - OUTPUT_DIR=/output/client_2
