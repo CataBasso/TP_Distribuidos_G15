@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-KEYS = ("clients", "gw", "year", "q1", "q2", "img", "ac", "lm", "wm", "P", "A", "K")
-BASE = dict(clients=1, gw=1, year=1, q1=1, q2=1, img=1, ac=1, lm=1, wm=1, P=1, A=1, K=1)
+KEYS = ("clients", "gw", "year", "q1", "q2", "img", "ac", "lm", "wm", "P", "A", "K", "sup")
+BASE = dict(clients=1, gw=1, year=1, q1=1, q2=1, img=1, ac=1, lm=1, wm=1, P=1, A=1, K=1, sup=0)
 
 SCENARIOS = {
     1: ("Un cliente, una réplica de cada etapa", {}),
@@ -27,8 +27,20 @@ SCENARIOS = {
 # CPU máxima de RabbitMQ. Se cambia con `make scenarios RABBIT_CPUS=1`.
 DEFAULT_RABBIT_CPUS = "2.0"
 
-SIZES = {"small": ("small_dataset", "small"), "medium": ("medium_dataset", "medium"), "large": ("large_dataset", "large")}
+SUPERVISOR_SETTINGS = {
+    "HEARTBEAT_PORT": "9000",        
+    "ELECTION_PORT": "9001",         
+    "PING_INTERVAL": "1",           
+    "PING_TIMEOUT": "0.5",          
+    "MISS_LIMIT": "3",               
+    "LEADER_MISS_LIMIT": "3",       
+    "STALL_LIMIT": "30",             
+    "ELECTION_TIMEOUT": "2",         
+    "COORDINATOR_TIMEOUT": "5",      
+}
+DOCKER_SOCKET = "/var/run/docker.sock:/var/run/docker.sock"
 
+SIZES = {"small": ("small_dataset", "small"), "medium": ("medium_dataset", "medium"), "large": ("large_dataset", "large")}
 
 def full(overrides):
     s = dict(BASE)
@@ -37,8 +49,9 @@ def full(overrides):
 
 
 def random_scenario(rng, max_replicas=3):
-    s = {k: rng.randint(1, max_replicas) for k in KEYS if k != "clients"}
+    s = {k: rng.randint(1, max_replicas) for k in KEYS if k not in ("clients", "sup")}
     s["clients"] = rng.randint(1, 4)
+    s["sup"] = 0
     return s
 
 
@@ -79,6 +92,8 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
     mom = "MOM_HOST=rabbitmq"
     py = "PYTHONUNBUFFERED=1"
     out = []
+    supervised = s.get("sup", 0) > 0
+    node_name = lambda name: [f"NODE_NAME={name}"] if supervised else []
 
     out.append(_svc("rabbitmq", "Dockerfile", ["RABBITMQ_LOG_LEVELS=error"], context="./src/rabbitmq",
                     image="tpdist/rabbitmq:latest", extra=[f'    cpus: "{rabbit_cpus}"'],
@@ -94,14 +109,14 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
         stage_names.append(name)
         out.append(_svc(name, "gateway/Dockerfile",
                         [f"GATEWAY_ID={g + 1}", "GATEWAY_PORT=5000", "RABBIT_HOST=rabbitmq",
-                         f"WORD_PARTITIONS={s['P']}", f"Q5_PARTITIONS={s['K']}", py], "rabbit",
+                         f"WORD_PARTITIONS={s['P']}", f"Q5_PARTITIONS={s['K']}"] + node_name(name) + [py], "rabbit",
                         image="tpdist/gateway:latest", build=(g == 0)))
 
     def replicas(prefix, count, dockerfile, env_of, volumes=()):
         for i in range(count):
             name = f"{prefix}_{i}"
             stage_names.append(name)
-            out.append(_svc(name, dockerfile, [f"ID={i}", mom] + env_of + [py], "rabbit",
+            out.append(_svc(name, dockerfile, [f"ID={i}", mom] + env_of + node_name(name) + [py], "rabbit",
                             image=f"tpdist/{prefix}:latest", build=(i == 0), volumes=volumes))
 
     replicas("year_filter", s["year"], "filters/year_filter/Dockerfile",
@@ -109,9 +124,7 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
     replicas("q1_filter", s["q1"], "filters/q1_filter/Dockerfile", ["INPUT_QUEUE=q1_in"])
     replicas("q2_filter", s["q2"], "filters/q2_filter/Dockerfile",
              ["INPUT_QUEUE=q2_in", "OUTPUT_QUEUE=img_in"])
-    # cache de imágenes compartida entre réplicas y clientes (ver ImageCache en image_getter.py)
-    replicas("image_getter", s["img"], "image/Dockerfile",
-             ["INPUT_QUEUE=img_in", "IMAGE_CACHE_DIR=/cache"], volumes=["image_cache:/cache"])
+    replicas("image_getter", s["img"], "image/Dockerfile", ["INPUT_QUEUE=img_in"])
     replicas("abstract_cleaner", s["ac"], "text_processing/abstract_cleaner/Dockerfile",
              ["INPUT_QUEUE=norm_in"])
     replicas("length_mapper", s["lm"], "text_processing/length_mapper/Dockerfile",
@@ -125,8 +138,17 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
              [f"WM_REPLICAS={s['wm']}"])
     stage_names.append("top_merger")
     out.append(_svc("top_merger", "text_processing/top_merger/Dockerfile",
-                    [mom, f"WORD_PARTITIONS={s['P']}", py], "rabbit",
+                    [mom, f"WORD_PARTITIONS={s['P']}"] + node_name("top_merger") + [py], "rabbit",
                     image="tpdist/top_merger:latest"))
+
+    supervisors = [f"supervisor_{i}" for i in range(s.get("sup", 0))]
+    monitored = ",".join(stage_names + supervisors)
+    for i, name in enumerate(supervisors):
+        env = [f"SUPERVISOR_ID={i}", f"SUPERVISOR_COUNT={len(supervisors)}", f"MONITORED_NODES={monitored}"]
+        env += [f"{k}={v}" for k, v in SUPERVISOR_SETTINGS.items()]
+        out.append(_svc(name, "supervisor/Dockerfile", env + [py], stage_names,
+                        image="tpdist/supervisor:latest", build=(i == 0),
+                        volumes=[DOCKER_SOCKET]))       
 
     for c in range(s["clients"]):
         out.append(_svc(f"client_{c}", "client/Dockerfile",
@@ -137,10 +159,10 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
                         extra=['    profiles: ["clients"]'],
                         volumes=[f"./data/sample/{dataset}:/data:ro", "./output:/output"]))
     header = f"# Generado por tools/scenarios.py -- {describe(s)}\n"
-    return header + "services:\n" + "\n".join(out) + "\nvolumes:\n  image_cache:\n"
+    return header + "services:\n" + "\n".join(out) + "\n"
 
 
-def write_all(size, random_n, seed, rabbit_cpus=DEFAULT_RABBIT_CPUS):
+def write_all(size, random_n, seed, rabbit_cpus=DEFAULT_RABBIT_CPUS, supervisors=0):
     d = ROOT / "scenarios"
     d.mkdir(exist_ok=True)
     written = {}
@@ -149,6 +171,8 @@ def write_all(size, random_n, seed, rabbit_cpus=DEFAULT_RABBIT_CPUS):
     rng = random.Random(seed)
     for i in range(random_n):
         written[100 + i] = random_scenario(rng)
+    for s in written.values():
+        s["sup"] = supervisors
     for n, s in written.items():
         (d / f"{n}.yaml").write_text(compose(s, size, rabbit_cpus))
     return written
@@ -165,6 +189,8 @@ def main(argv=None):
     g.add_argument("--seed", type=int, default=0)
     g.add_argument("--rabbit-cpus", default=DEFAULT_RABBIT_CPUS,
                    help="CPUs máximas del contenedor de RabbitMQ (ej. 1, 1.5, 2.0)")
+    g.add_argument("--supervisors", type=int, default=0,
+                   help="cantidad de Supervisores (0 = ninguno); con >0 también se pone NODE_NAME en cada servicio")
     sw = sub.add_parser("switch")
     sw.add_argument("n", type=int)
     a = p.parse_args(argv)
@@ -174,7 +200,7 @@ def main(argv=None):
         for n, (desc, over) in SCENARIOS.items():
             print(f"{n}) {desc}\n     {describe(full(over))}")
     elif a.cmd == "generate":
-        for n, s in write_all(a.size, a.random, a.seed, a.rabbit_cpus).items():
+        for n, s in write_all(a.size, a.random, a.seed, a.rabbit_cpus, a.supervisors).items():
             print(f"scenarios/{n}.yaml  {describe(s)}")
     else:
         src = ROOT / "scenarios" / f"{a.n}.yaml"
