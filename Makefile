@@ -6,6 +6,7 @@ MIDDLEWARE_TEST_FILE = tests/test_middleware.py
 PROTOCOL_TEST_FILE = tests/test_protocol.py
 SIZE ?= small
 N ?= 1
+SUPERVISORS ?= 0    
 export SIZE
 
 .PHONY: setup up down rabbit-up rabbit-down test test-unit test-integration logs
@@ -125,7 +126,7 @@ run-fake-system:
 .PHONY: scenarios switch test-scenario test-all-scenarios test-scenarios test-random
 
 scenarios:
-	python3 tools/scenarios.py generate --size $(SIZE) --random $(or $(RANDOM_N),0) --seed $(or $(SEED),0) --rabbit-cpus $(or $(RABBIT_CPUS),2.0)
+	python3 tools/scenarios.py generate --size $(SIZE) --random $(or $(RANDOM_N),0) --seed $(or $(SEED),0) --rabbit-cpus $(or $(RABBIT_CPUS),2.0) --supervisors $(SUPERVISORS)
 
 switch: scenarios
 	@python3 tools/scenarios.py list; \
@@ -145,7 +146,7 @@ test-scenario: build      ##con Docker: levanta el sistema, corre los clientes, 
 test-all-scenarios:        ##con Docker: todos los escenarios fijos (python3 tools/scenarios.py ids), uno tras otro (SIZE=small|medium)
 	@fail=0; for n in $$(python3 tools/scenarios.py ids); do \
 	  echo "=== escenario $$n ($(or $(SIZE),small)) ==="; \
-	  python3 tools/scenarios.py generate --size $(or $(SIZE),small) --rabbit-cpus $(or $(RABBIT_CPUS),2.0) > /dev/null; \
+	  python3 tools/scenarios.py generate --size $(or $(SIZE),small) --rabbit-cpus $(or $(RABBIT_CPUS),2.0) --supervisors $(SUPERVISORS) > /dev/null; \
 	  python3 tools/scenarios.py switch $$n; \
 	  $(MAKE) --no-print-directory test-scenario KEEP=0 SIZE=$(or $(SIZE),small) LOG=$(or $(SIZE),small)_$$n || fail=1; \
 	done; echo; [ $$fail -eq 0 ] && echo "TODOS OK" || echo "HUBO FALLAS (logs en logs/)"; exit $$fail
