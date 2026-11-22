@@ -1,30 +1,9 @@
-
+from .. import safe_socket
+from ..safe_socket import FrameError      # se re-exporta: el cliente, el Gateway y los tests lo importan de acá
 from .messages import encode, decode
 
-MAX_FRAME_BYTES = 64 * 1024 * 1024
-_HEADER_SIZE = 4
-
-
-class FrameError(Exception):
-    """Error al recibir o decodificar un mensaje TCP."""
-
-
-def _recv_exact(sock, size, allow_eof_at_start=False):
-    chunks = []
-    remaining = size
-
-    while remaining > 0:
-        chunk = sock.recv(min(remaining, 1 << 20))
-
-        if not chunk:
-            if allow_eof_at_start and remaining == size:
-                return None
-            raise FrameError("conexión cerrada a mitad de un mensaje")
-
-        chunks.append(chunk)
-        remaining -= len(chunk)
-
-    return b"".join(chunks)
+MAX_FRAME_BYTES = safe_socket.MAX_PACKET_SIZE
+MIN_FRAME_BYTES = 4                       # el contenido empieza con el tipo de mensaje (un uint32)
 
 
 def send_frame(sock, message):
@@ -33,29 +12,16 @@ def send_frame(sock, message):
     except (ValueError, TypeError, UnicodeError) as exc:
         raise FrameError(f"mensaje inválido: {exc}") from exc
 
-    if len(data) > MAX_FRAME_BYTES:
-        raise FrameError(
-            f"mensaje de {len(data)} bytes supera el máximo"
-        )
-
-    header = len(data).to_bytes(_HEADER_SIZE, "big")
-    sock.sendall(header + data)
+    safe_socket.send_packet(sock, data, max_size=MAX_FRAME_BYTES)
 
 
 def recv_frame(sock):
-    header = _recv_exact(
-        sock, _HEADER_SIZE, allow_eof_at_start=True
+    data = safe_socket.recv_packet(
+        sock, min_size=MIN_FRAME_BYTES, max_size=MAX_FRAME_BYTES
     )
 
-    if header is None:
+    if data is None:
         return None
-
-    length = int.from_bytes(header, "big")
-
-    if length < 4 or length > MAX_FRAME_BYTES:
-        raise FrameError(f"largo de mensaje inválido: {length}")
-
-    data = _recv_exact(sock, length)
 
     try:
         return decode(data)
