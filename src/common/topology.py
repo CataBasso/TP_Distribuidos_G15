@@ -20,7 +20,16 @@ Q5_IN = "q5_in" #Una cola por particion de Q5
 RESULTS_EX = "results_ex"   #Todos los productores de resultados -> Gateway (clave=gw_id)
 RESULTS_Q = "results_q" #Cola results_q.<g>: la consume el Gateway g
 
-EXCHANGE_KINDS = {TOK_EX: "fanout", LM_CTRL: "fanout", WM_CTRL: "fanout", AVG_EX: "fanout", ABORT_EX: "fanout"}
+#Exchanges de control de las etapas con cobertura de batches
+YEAR_CTRL = "year_ctrl"
+Q1_CTRL = "q1_ctrl"
+Q2_CTRL = "q2_ctrl"
+IMG_CTRL = "img_ctrl"
+AC_CTRL = "ac_ctrl"
+
+EXCHANGE_KINDS = {TOK_EX: "fanout", LM_CTRL: "fanout", WM_CTRL: "fanout", AVG_EX: "fanout", ABORT_EX: "fanout",
+                  YEAR_CTRL: "fanout", Q1_CTRL: "fanout", Q2_CTRL: "fanout", IMG_CTRL: "fanout",
+                  AC_CTRL: "fanout"}
 
 #Nombres de etapa
 STAGE_ABSTRACT_CLEANER = "abstract_cleaner"
