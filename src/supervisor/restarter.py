@@ -1,5 +1,7 @@
-import logging
 import subprocess
+
+from common.logger import logger
+from common.logger.logger import LogResult
 
 STOP_TIMEOUT = 3     
 RUN_TIMEOUT = 30    
@@ -16,12 +18,13 @@ class Restarter:
             result = self.run(self._command(node), capture_output=True, text=True,
                           timeout=self.run_timeout)
         except (OSError, subprocess.TimeoutExpired) as e:
-            logging.error("no se pudo reiniciar '%s': %s", node, e)
+            logger.error("node_restart", LogResult.fail, "node", node, "error", e)
             return False
         
         if result.returncode != 0:
+            logger.error("node_restart", LogResult.fail, "node", node, "stderr", result.stderr.strip())
             return False
-        logging.info("nodo '%s' reiniciado", node)
+        logger.info("node_restart", LogResult.success, "node", node)
         return True
 
     def _command(self, node):

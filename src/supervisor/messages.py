@@ -1,7 +1,7 @@
 ELECTION = "ELECTION"
 OK = "OK"
 COORDINATOR = "COORDINATOR"
-
+HELLO = "HELLO"     
 
 def encode(message):
     type = message['type']
@@ -15,7 +15,7 @@ def decode(data):
     
     type = data_dict[0]
     id = int(data_dict[1])
-    if type not in (ELECTION, OK, COORDINATOR):
+    if type not in (ELECTION, OK, COORDINATOR, HELLO):
         raise ValueError(f"tipo desconocido: {type}")
 
     return {'type': type, 'id': id}
@@ -31,3 +31,7 @@ def ok(sender_id):
 
 def coordinator(sender_id):
     return {'type': COORDINATOR, 'id': sender_id}
+
+
+def hello(sender_id):
+    return {'type': HELLO, 'id': sender_id}

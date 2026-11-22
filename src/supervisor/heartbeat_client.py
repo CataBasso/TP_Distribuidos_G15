@@ -1,8 +1,17 @@
-import logging
 import socket
 import time
 
+from common.logger import logger
+from common.logger.logger import LogResult
+
 RECV_SIZE = 1024   
+
+def _parse_pong(data):
+    parts = data.decode().split()          
+    if len(parts) != 4 or parts[0] != "PONG":
+        raise ValueError("no es un PONG")
+    return int(parts[1]), parts[2], float(parts[3])
+
 
 class HeartbeatClient:
 
@@ -38,7 +47,7 @@ class HeartbeatClient:
             try:
                 self.sock.sendto(message, self._address_of(node))
             except OSError as e:
-                logging.debug("no se pudo mandar PING a '%s': %s", node, e)
+                logger.debug("ping_send", LogResult.fail, "node", node, "error", e)
 
     def _collect_pongs(self, nodes, seq):
         wanted = set(nodes)
@@ -55,13 +64,13 @@ class HeartbeatClient:
             except socket.timeout:
                 break
             except OSError as e:                
-                logging.debug("error leyendo PONG: %s", e)
+                logger.debug("pong_read", LogResult.fail, "error", e)
                 break
 
             try:
-                pong_seq, node, progress = self._parse_pong(data)
+                pong_seq, node, progress = _parse_pong(data)
             except ValueError as e:
-                logging.debug("PONG ignorado (%s): %r", e, data[:100])
+                logger.debug("pong_ignored", LogResult.fail, "error", e, "data", data[:100])
                 continue
 
             if pong_seq != seq or node not in wanted:
@@ -69,13 +78,6 @@ class HeartbeatClient:
             pongs[node] = progress
 
         return pongs
-
-    @staticmethod
-    def _parse_pong(data):
-        parts = data.decode().split()          
-        if len(parts) != 4 or parts[0] != "PONG":
-            raise ValueError("no es un PONG")
-        return int(parts[1]), parts[2], float(parts[3])
 
     def _is_alive(self, progress):
         return progress < self.stall_limit
