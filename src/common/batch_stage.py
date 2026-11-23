@@ -22,6 +22,7 @@ class BatchStage(Stage):
             state_dir=os.path.join(state_dir, "eof") if state_dir else None, emit_all=self.emit_all))
 
     def declare_outputs(self) -> None:
+        """Declara las colas de salida (para poder publicar antes de que el consumidor arranque)"""
 
     def bind_input(self) -> None:
         self.bus.listen(self.input_queue, self.handler(self._on_data))

@@ -1,103 +1,74 @@
 import logging
 
-from common.protocol.messages import encode, eof_message, stage_eof_message, word_counts_message
-from common.stage import EofCounter, Stage
-from common.topology import (
-    STAGE_ABSTRACT_CLEANER, TOK_EX, WM_CTRL, WM_IN, WORDS_EX, WORDS_Q, partition, queue_of,
-)
+from common.batch_stage import BatchStage
 from common.bus import RabbitBus
-from common.runner import broker_host, env_int, run_stage
+from common.ft.ids import msg_id
+from common.protocol.messages import eof_message, word_counts_message, with_id
+from common.runner import broker_host, env_int, run_stage, state_dir
+from common.topology import TOK_EX, WM_CTRL, WM_IN, WORDS_EX, WORDS_Q, partition, queue_of
 
 log = logging.getLogger(__name__)
 
 EN, FR = "en", "fr"
 
-class WordMapper(Stage):
+
+class WordMapper(BatchStage):
     name = "word_mapper"
+    ctrl_exchange = WM_CTRL
+    input_queue = WM_IN
+    batch_types = ("tokens_batch",)
+    emit_all = True
 
-    def __init__(self, bus, replica_id: int, upstream_replicas: int, word_partitions: int, flush_every: int = 1000):
-        super().__init__(bus)
-        self.replica_id = replica_id
+    def __init__(self, bus, replica_id: int, upstream_replicas: int, word_partitions: int,
+                 flush_every: int = None, state_dir=None):
         self.P = word_partitions
-        self.flush_every = flush_every
-        self.eofs = EofCounter(upstream_replicas)
-        self._acc = {}      
-        self._pending = {} 
         self.stats = {"articles": 0, "skipped_null": 0, "unknown_lang": 0}
+        super().__init__(bus, replica_id, state_dir)
 
-    def start(self) -> None:
+    #Declara una cola por partición con su clave
+    def declare_outputs(self) -> None:
         for p in range(self.P):
             self.bus.declare(queue_of(WORDS_Q, p), WORDS_EX, [str(p)])
-        self.bus.listen(WM_IN, self.handler(self._on_input), TOK_EX, kind="fanout")
-        self.bus.listen(None, self.handler(self._on_ctrl), WM_CTRL, kind="fanout")
-        self.listen_abort()
 
-    def _on_input(self, message: dict) -> None:
-        if message["type"] == "tokens":
-            self._on_article(tuple(message["client_id"]), message["lang"], message["words"])
-        elif message["type"] == "tokens_batch":
-            client_id = tuple(message["client_id"])
-            for _url, lang, _period, _n, words in message["articles"]:
-                self._on_article(client_id, lang, words)
-        elif message["type"] in ("eof", "stage_eof"):
-            ctrl = stage_eof_message(message["client_id"], STAGE_ABSTRACT_CLEANER,message.get("origin", 0))
-            self.bus.send(WM_CTRL, encode(ctrl))
-        else:
-            log.warning("word_mapper: tipo inesperado %s", message["type"])
+    #Escucha WM_IN sobre TOK_EX
+    def bind_input(self) -> None:
+        self.bus.listen(WM_IN, self.handler(self._on_data), TOK_EX, kind="fanout")
 
-    def _on_article(self, client_id, lang, words) -> None:
-        if words is None:
-            self.stats["skipped_null"] += 1
-            return
-        if lang not in (EN, FR):
-            self.stats["unknown_lang"] += 1
-            log.warning("word_mapper: idioma desconocido %r", lang)
-            return
-        counts = self._acc.setdefault(client_id, {})
-        col = 0 if lang == EN else 1
-        for word in set(words):  
-            counts.setdefault(word, [0, 0])[col] += 1
-        self.stats["articles"] += 1
-        self._pending[client_id] = self._pending.get(client_id, 0) + 1
-        if self._pending[client_id] >= self.flush_every:
-            self._flush(client_id)
-
-    def _flush(self, client_id) -> None:
-        counts = self._acc.pop(client_id, None)
-        self._pending.pop(client_id, None)
-        if not counts:
-            return
+    #Cuenta palabras por idioma solo de ese batch, las agrupa por partición y publica
+    def process_batch(self, client_id, message: dict) -> None:
+        batch_id = message.get("batch_id", 0)
+        counts = {}
+        for _url, lang, _period, _n, words in message["articles"]:
+            if words is None:
+                self.stats["skipped_null"] += 1
+                continue
+            if lang not in (EN, FR):
+                self.stats["unknown_lang"] += 1
+                log.warning("word_mapper: idioma desconocido %r", lang)
+                continue
+            col = 0 if lang == EN else 1
+            for word in set(words):
+                counts.setdefault(word, [0, 0])[col] += 1
+            self.stats["articles"] += 1
         by_partition = {}
         for word, pair in counts.items():
             by_partition.setdefault(partition(word, self.P), {})[word] = pair
         for p, part in by_partition.items():
-            body = encode(word_counts_message(part, client_id, origin=self.replica_id))
-            self.bus.send(WORDS_EX, body, key=str(p))
+            out = word_counts_message(part, client_id, origin=self.replica_id)
+            self.publish(WORDS_EX, with_id(out, msg_id(client_id, "wm", batch_id, p)), key=str(p))
 
-    def _on_ctrl(self, message: dict) -> None:
-        if message["type"] != "stage_eof" or message["stage"] != STAGE_ABSTRACT_CLEANER:
-            return
-        client_id = tuple(message["client_id"])
-        if self.eofs.add(client_id, message["origin"]):
-            self._finish(client_id)
-
-    def _finish(self, client_id) -> None:
-        self._flush(client_id)
-        eof = encode(eof_message(client_id, origin=self.replica_id))
+    #Por cada partición publica un EOF con origin = replica_id y msg_id
+    def publish_eof(self, client_id, total: int) -> None:
         for p in range(self.P):
-            self.bus.send(WORDS_EX, eof, key=str(p))
-        self.eofs.forget(client_id)
+            eof = eof_message(client_id, origin=self.replica_id)
+            self.publish(WORDS_EX, with_id(eof, msg_id(client_id, "wm-eof", self.replica_id, p)), key=str(p))
         log.info("word_mapper[%d]: cliente %s terminado", self.replica_id, client_id)
-
-    def on_abort(self, client_id) -> None:
-        self._acc.pop(client_id, None)
-        self._pending.pop(client_id, None)
-        self.eofs.forget(client_id)
 
 
 def main() -> None:
-    bus = RabbitBus(broker_host())
-    run_stage(WordMapper(bus, env_int("REPLICA_ID", alt="ID"), env_int("CLEANER_REPLICAS"),env_int("WORD_PARTITIONS"), env_int("FLUSH_EVERY", 1000)))
+    rid = env_int("REPLICA_ID", alt="ID")
+    run_stage(WordMapper(RabbitBus(broker_host()), rid, env_int("CLEANER_REPLICAS"),
+                         env_int("WORD_PARTITIONS"), state_dir=state_dir(f"word_mapper_{rid}")))
 
 
 if __name__ == "__main__":
