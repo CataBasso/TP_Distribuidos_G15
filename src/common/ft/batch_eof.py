@@ -7,23 +7,21 @@ from common.ft.ids import client_key, parse_client_key
 from common.ft.store import StateStore
 
 log = logging.getLogger(__name__)
-DONE_KEPT = 2000    # clientes terminados que se recuerdan (para contestar un `sync` y descartar reentregas)
+DONE_KEPT = 2000  
 
 
 class BatchEof:
     def __init__(self, stage: str, replica_id: int, send_control, on_complete, state_dir=None,
                  emit_all: bool = False, **journal_kw):
-        """send_control(message): publica en el exchange de control.
-        on_complete(client_id, total): publica el EOF hacia la etapa siguiente."""
         self.stage, self.replica = stage, replica_id
         self.send_control = send_control
         self.on_complete = on_complete
         self.emit_all = emit_all
-        self.own = {}        # ck -> set(batch_id) que procesó esta réplica
-        self.total = {}      # ck -> total de batches
-        self.holds = set()   # ck cuyo EOF consumió esta réplica
-        self.done = {}       # ck -> total (clientes terminados, los más recientes)
-        self.others = {}     # ck -> set(batch_id) que informaron las otras réplicas (no se persiste)
+        self.own = {}        
+        self.total = {}     
+        self.holds = set()   
+        self.done = {}     
+        self.others = {}    
         self.aborted = BoundedSet()
         self.store = StateStore(state_dir, self._apply, self._dump, self._load, **journal_kw)
         self.store.recover()
@@ -66,7 +64,6 @@ class BatchEof:
     def pending(self):
         return [ck for ck in self.total if ck not in self.done]
 
-    # ---------- eventos ----------
     def is_closed(self, client_id) -> bool:
         ck = client_key(client_id)
         return ck in self.done or ck in self.aborted
