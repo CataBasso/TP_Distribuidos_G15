@@ -26,6 +26,9 @@ class InMemoryBroker:
                 continue
             on_message(body, ack, lambda requeue=True: None)
 
+    def defer(self, fn):
+        fn()
+
     def stop_results(self):
         self._stop.set()
 
@@ -83,3 +86,27 @@ def query_eof(client_id, query, origin=0):
     m = eof_message(client_id, origin=origin)
     m["query"] = query
     return encode(m)
+
+
+class Feeder:
+    """Arma el flujo del AbstractCleaner: batches numerados 0..n-1 por cliente y un EOF con el total."""
+
+    def __init__(self, bus):
+        self.bus, self.n = bus, {}
+
+    def batch(self, client, rows):
+        """rows: [[url, lang, period, n_words, words]] -> un tokens_batch con el próximo batch_id."""
+        from common.protocol.messages import tokens_batch_message
+        b = self.n.get(client, 0)
+        self.n[client] = b + 1
+        self.bus.send(TOK_EX, encode(tokens_batch_message(rows, client, b, origin=0)))
+        return b
+
+    def article(self, client, url, n_words, period, lang="en"):
+        words = None if n_words is None else [f"w{i}" for i in range(n_words)]
+        return self.batch(client, [[url, lang, period, n_words, words]])
+
+    def eof(self, client, total=None):
+        from common.protocol.messages import stage_eof_message
+        total = self.n.get(client, 0) if total is None else total
+        self.bus.send(TOK_EX, encode(stage_eof_message(client, "abstract_cleaner", 0, total=total)))

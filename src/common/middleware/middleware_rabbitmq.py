@@ -35,6 +35,12 @@ class RabbitConnection(MessageMiddlewareConnection):
         if confirm:
             self.channel.confirm_delivery()
 
+    def call_threadsafe(self, fn):
+        try:
+            self.connection.add_callback_threadsafe(fn)
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(str(e)) from e
+
     def run(self):
         try:
             self.channel.start_consuming()

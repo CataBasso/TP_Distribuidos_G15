@@ -9,6 +9,8 @@ RESULT = 4
 DONE = 5
 WELCOME = 6
 ERROR = 7
+RESUME = 8       # Client -> Gateway: reanuda una sesión después de una caída del Gateway
+RESULT_ACK = 9   # Client -> Gateway: el cliente ya guardó el resultado con ese msg_id
 
 # Mensajes internos: etapas del pipeline
 ARTICLE = 20
@@ -41,6 +43,8 @@ TYPE_NAMES = {
     DONE: "done",
     WELCOME: "welcome",
     ERROR: "error",
+    RESUME: "resume",
+    RESULT_ACK: "result_ack",
     ARTICLE: "article",
     FILTERED_ARTICLE: "filtered_article",
     TOKENS: "tokens",
@@ -75,6 +79,8 @@ REQUIRED_FIELDS = {
     DONE: (),
     WELCOME: ("client_id",),
     ERROR: ("code", "message"),
+    RESUME: ("client_id",),
+    RESULT_ACK: ("msg_id",),
     ARTICLE: ("article",),
     FILTERED_ARTICLE: ("query", "article"),
     TOKENS: ("url", "lang", "words", "period"),
@@ -96,8 +102,10 @@ OPTIONAL_FIELDS = {
     ABORT: ("client_id",),
     RESULT: ("client_id", "origin"),
     DONE: ("client_id",),
-    WELCOME: (),
+    WELCOME: ("next_batch", "eof_sent", "resumed"),
     ERROR: ("client_id",),
+    RESUME: (),
+    RESULT_ACK: ("client_id",),
     ARTICLE: ("client_id", "batch_id", "origin"),
     FILTERED_ARTICLE: ("client_id", "batch_id", "origin"),
     TOKENS: ("client_id", "batch_id", "origin"),
@@ -107,10 +115,14 @@ OPTIONAL_FIELDS = {
     AVERAGE_READY: ("client_id",),
     Q5_ARTICLE: ("client_id", "batch_id", "origin"),
     STAGE_EOF: ("client_id", "total"),
-    CONTROL: ("client_id", "total"),
+    CONTROL: ("client_id", "total", "ranges", "sync"),
     TOKENS_BATCH: ("client_id", "batch_id", "origin"),
     Q5_ARTICLES_BATCH: ("client_id", "batch_id", "origin"),
 }
+
+# Todo mensaje puede llevar su identificador determinista (common.ft.ids.msg_id)
+for _t in list(OPTIONAL_FIELDS):
+    OPTIONAL_FIELDS[_t] = tuple(OPTIONAL_FIELDS[_t]) + ("msg_id",)
 
 
 def client_id_of(message):
@@ -175,6 +187,9 @@ def validate_message(message):
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise ValueError(f"{field} debe ser un entero >= 0")
             
+    if "msg_id" in message and not isinstance(message["msg_id"], str):
+        raise ValueError("msg_id debe ser un string")
+
     if msg_type == ERROR:
         if not isinstance(message["code"], str):
             raise ValueError("code debe ser un string")
@@ -256,8 +271,32 @@ def done_message(client_id):
     return {"type": "done", "client_id": tuple(client_id)}
 
 
-def welcome_message(client_id):
-    return {"type": "welcome", "client_id": tuple(client_id)}
+def welcome_message(client_id, next_batch=None, eof_sent=None, resumed=None):
+    message = {"type": "welcome", "client_id": tuple(client_id)}
+    if next_batch is not None:
+        message["next_batch"] = next_batch
+    if eof_sent is not None:
+        message["eof_sent"] = eof_sent
+    if resumed is not None:
+        message["resumed"] = resumed
+    return message
+
+
+def resume_message(client_id):
+    return {"type": "resume", "client_id": tuple(client_id)}
+
+
+def result_ack_message(msg_id, client_id=None):
+    message = {"type": "result_ack", "msg_id": msg_id}
+    if client_id is not None:
+        message["client_id"] = tuple(client_id)
+    return message
+
+
+def with_id(message, mid):
+    """Le pone su msg_id determinista a un mensaje y lo devuelve."""
+    message["msg_id"] = mid
+    return message
 
 
 def error_message(code, message, client_id=None):
@@ -385,14 +424,19 @@ def stage_eof_message(client_id, stage, origin, total=None):
         message["total"] = total
     return message
 
-def control_message(client_id, stage, replica, count, total=None):
+def control_message(client_id, stage, replica, count, total=None, ranges=None, sync=None):
     message = {
         "type": "control",
-        "client_id": tuple(client_id),
         "stage": stage,
         "replica": replica,
         "count": count,
     }
+    if client_id is not None:
+        message["client_id"] = tuple(client_id)
     if total is not None:
         message["total"] = total
+    if ranges is not None:
+        message["ranges"] = ranges
+    if sync:
+        message["sync"] = True
     return message

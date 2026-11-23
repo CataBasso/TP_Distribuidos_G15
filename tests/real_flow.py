@@ -48,8 +48,8 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
     q2 = load("filters.q2_filter.query2", "q2_in", "img_in")
     yf = load("filters.year_filter.year_filter", "year_in")
     ig = load("image.image_getter", "img_in")
-    ac = load("text_processing.abstract_cleaner.abstract_cleaner", "norm_in")
     from filters.q5_filter.q5_filter import Q5Filter
+    from text_processing.abstract_cleaner.abstract_cleaner import AbstractCleaner
     from common.topology import expected_result_eofs
     from text_processing.avg_reducer.avg_reducer import AvgReducer
     from text_processing.length_mapper.length_mapper import LengthMapper
@@ -65,14 +65,14 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
     def spawn(name, fn):
         threading.Thread(target=fn, name=name, daemon=True).start()
 
-    def real(mod, cls, i, *a, **kw):           # componentes de la otra gente: leen ID del módulo
+    def real(mod, cls, i, *a, **kw):           # componentes de la otra gente (aún sin migrar): leen ID del módulo
         mod.ID = i
         c = getattr(mod, cls)(*a, **kw)
         c.setup_consumers()
         stops.append(c.rc.stop)
         spawn(f"{cls}{i}", c.rc.run)
 
-    def mine(stage):                           # etapas con Stage: start() + bus.run()
+    def mine(stage):                           # start() + bus.run() en su propio hilo
         stage.start()
         stops.append(stage.bus.stop)
         spawn(stage.name, stage.bus.run)
@@ -91,7 +91,7 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
     for r in range(LM):
         mine(LengthMapper(bus(), r, AC, A, K))
     for i in range(AC):
-        real(ac, "AbstractCleaner", i)
+        mine(AbstractCleaner(bus(), i, "norm_in"))
     for i in range(s["img"]):
         real(ig, "ImageGetter", i, wiki=StubWiki())
     for i in range(s["q1"]):

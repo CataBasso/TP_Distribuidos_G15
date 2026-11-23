@@ -1,12 +1,12 @@
 """WordMapper -> WordReducer con un InMemoryBus (sin RabbitMQ)."""
 from common.bus import InMemoryBus
 from common.protocol import decode
-from common.protocol.messages import encode, eof_message
-from common.topology import RESULTS_EX, TOK_EX, TOP_IN
+from common.protocol.messages import eof_message
+from common.topology import RESULTS_EX, TOP_IN
 from text_processing.word_mapper.word_mapper import WordMapper
 from text_processing.word_reducer.word_reducer import WordReducer
 
-from fakes import cleaner_eof, tokens
+from fakes import Feeder
 
 C = (1, 1)
 P = 2
@@ -14,6 +14,7 @@ P = 2
 
 def build(mappers=2, cleaners=1, chunk_rows=500, top_n=20):
     bus = InMemoryBus()
+    _feeders.pop(id(bus), None)
     stages = [WordMapper(bus, r, cleaners, P) for r in range(mappers)]
     stages += [WordReducer(bus, p, mappers, chunk_rows, top_n) for p in range(P)]
     for s in stages:
@@ -21,14 +22,16 @@ def build(mappers=2, cleaners=1, chunk_rows=500, top_n=20):
     return bus, stages
 
 
+_feeders = {}
+
+
 def article(bus, url, words, lang):
-    m = decode(tokens(C, url, words, "<=2020"))
-    m["lang"] = lang
-    bus.send(TOK_EX, encode(m))
+    f = _feeders.setdefault(id(bus), Feeder(bus))
+    f.batch(C, [[url, lang, "<=2020", len(words), words]])
 
 
 def finish(bus):
-    bus.send(TOK_EX, cleaner_eof(C, 0))
+    _feeders.setdefault(id(bus), Feeder(bus)).eof(C)
     bus.drain()
 
 
@@ -79,10 +82,10 @@ def test_waits_for_every_mapper_replica_before_emitting():
     bus = InMemoryBus()
     r = WordReducer(bus, 0, 2)
     r.start()
-    r._on_input({"type": "word_counts", "counts": {"x": [1, 1]}, "client_id": C, "origin": 0})
-    r._on_input(eof_message(C, origin=0))
+    r.on_message({"type": "word_counts", "counts": {"x": [1, 1]}, "client_id": C, "origin": 0})
+    r.on_message(eof_message(C, origin=0))
     assert not bus.bodies(RESULTS_EX)
-    r._on_input(eof_message(C, origin=1))
+    r.on_message(eof_message(C, origin=1))
     assert q3(bus) == (["x"], [0])
 
 
@@ -93,9 +96,10 @@ def test_q3_rows_are_chunked_and_abort_drops_state():
     finish(bus)
     chunks = [decode(b) for b in bus.bodies(RESULTS_EX) if decode(b)["type"] == "result"]
     assert all(len(m["rows"]) == 1 for m in chunks) and len(chunks) == 3
+    from common.ft.ids import client_key
     for s in stages:
         s.on_abort(C)
-    assert not any(C in getattr(s, "_words", {}) for s in stages)
+    assert all(client_key(C) not in getattr(s, "state", {}) for s in stages)
 
 
 def test_top_merger_end_to_end_global_top_and_eof():
@@ -119,8 +123,9 @@ def test_top_merger_waits_for_every_partition_and_abort_drops_state():
     bus = InMemoryBus()
     tm = TopMerger(bus, 2)
     tm.start()
-    tm._on_input(partial_top_message({"a": 1}, C, origin=0))
-    tm._on_input(eof_message(C, origin=0))
+    from common.ft.ids import client_key
+    tm.on_message(partial_top_message({"a": 1}, C, origin=0))
+    tm.on_message(eof_message(C, origin=0))
     assert not bus.bodies(RESULTS_EX)
     tm.on_abort(C)
-    assert C not in tm._tops
+    assert client_key(C) not in tm.state

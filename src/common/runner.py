@@ -26,6 +26,11 @@ def env_str(name: str, default: str) -> str:
 def broker_host() -> str:
     return os.environ.get("MOM_HOST") or os.environ.get("RABBIT_HOST") or "localhost"
 
+#Directorio donde la etapa guarda su estado
+def state_dir(name: str):
+    root = os.environ.get("STATE_DIR")
+    return os.path.join(root, name) if root else None
+
 
 def run_stage(stage, level: str = None) -> None:
     logging.basicConfig(level=level or os.environ.get("LOG_LEVEL", "INFO"),
