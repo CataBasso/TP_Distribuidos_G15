@@ -20,7 +20,9 @@ Uso:
 import collections
 import itertools
 import threading
+import time
 
+from common.ft import failpoints
 import common.middleware as mw_pkg
 import common.middleware.middleware_rabbitmq as mw_rabbit
 
@@ -54,6 +56,21 @@ class FakeBroker:
         self.declare_queue(name)
         return name
 
+    def remove_queue(self, name):
+        """Borra una cola exclusiva (al cerrarse la conexión que la creó) y sus bindings."""
+        with self.cond:
+            self.queues.pop(name, None)
+            for ex in self.exchanges.values():
+                ex["binds"] = [(q, k) for q, k in ex["binds"] if q != name]
+
+    def requeue(self, queue, bodies):
+        """Reentrega al principio de la cola los mensajes que no se confirmaron (orden original)."""
+        with self.cond:
+            if queue in self.queues:
+                for body in reversed(bodies):
+                    self.queues[queue].appendleft(body)
+            self.cond.notify_all()
+
     def publish(self, exchange, key, body):
         with self.cond:
             self.published.append((exchange, key, body))
@@ -78,38 +95,109 @@ BROKER = None
 
 
 class RabbitConnection:
+    """Conexión falsa. Rastrea los mensajes entregados y no confirmados: si la conexión muere
+    (kill(), una caída simulada o close()), el broker los reentrega, como RabbitMQ."""
+
     def __init__(self, host=None, heartbeat=600, retries=10, delay=1.0, confirm=False, prefetch=1, **kw):
         self.broker = BROKER
         self.confirm = confirm
         self.consumers = []                         # (cola, callback)
+        self.anon = []                              # colas exclusivas de esta conexión
+        self.outstanding = []                       # [cola, cuerpo, estado] entregados sin confirmar
         self._stopped = False
+        self._killed = False
+        self.crashed = False
+        self._dead = False                          # SIGKILL: los acks posteriores no cuentan
+        self.periodic = []                          # [intervalo, fn, próximo]
 
     def add_consumer(self, queue, callback):
         with self.broker.cond:
             self.consumers.append((queue, callback))
             self.broker.cond.notify_all()
 
+    def add_periodic(self, interval, fn):
+        self.periodic.append([interval, fn, time.monotonic() + interval])
+
+    def call_threadsafe(self, fn):
+        fn()
+
     def run(self):
         b = self.broker
-        while True:
-            with b.cond:
-                while not self._stopped:
-                    ready = [(q, cb) for q, cb in self.consumers if b.queues[q]]
-                    if ready:
-                        break
-                    b.cond.wait(timeout=0.2)
-                if self._stopped:
-                    return
-                queue, cb = ready[0]
-                body = b.queues[queue].popleft()
-            acked = []
-            cb(body, lambda: acked.append(True), lambda requeue=True: self._nack(queue, body, requeue))
+        try:
+            while True:
+                with b.cond:
+                    while not self._stopped and not self._killed:
+                        ready = [(q, cb) for q, cb in self.consumers if b.queues[q]]
+                        if ready:
+                            break
+                        b.cond.wait(timeout=0.2)
+                        self._tick()
+                    if self._stopped or self._killed:
+                        return
+                    queue, cb = ready[0]
+                    body = b.queues[queue].popleft()
+                entry = [queue, body, "open"]
+                self.outstanding.append(entry)
 
-    def _nack(self, queue, body, requeue):
-        if requeue:
-            with self.broker.cond:
-                self.broker.queues[queue].appendleft(body)
-                self.broker.cond.notify_all()
+                def ack(entry=entry):
+                    if not self._dead:
+                        entry[2] = "acked"
+
+                def nack(requeue=True, entry=entry):
+                    if not self._dead:
+                        entry[2] = "requeue" if requeue else "dropped"
+
+                try:
+                    cb(body, ack, nack)
+                except failpoints.SimulatedCrash:
+                    self.crashed = True
+                    return
+                finally:
+                    self._settle()
+        finally:
+            self._release()
+
+    def _tick(self):
+        now = time.monotonic()
+        for item in self.periodic:
+            if now >= item[2]:
+                item[2] = now + item[0]
+                item[1]()
+
+    def _settle(self):
+        """Después de cada callback: los nack(requeue=True) vuelven a la cola; los ack/dropped se descartan.
+        Los mensajes sin ack (acks diferidos del Gateway) siguen pendientes."""
+        keep = []
+        for entry in self.outstanding:
+            if entry[2] == "requeue":
+                self.broker.requeue(entry[0], [entry[1]])
+            elif entry[2] == "open" and entry is self.outstanding[-1] and False:
+                keep.append(entry)
+            elif entry[2] == "open":
+                keep.append(entry)
+        self.outstanding = keep
+
+    def _release(self):
+        """La conexión terminó: reentrega lo no confirmado y borra las colas exclusivas."""
+        by_queue = {}
+        for queue, body, state in self.outstanding:
+            if state == "open":
+                by_queue.setdefault(queue, []).append(body)
+        self.outstanding = []
+        for queue, bodies in by_queue.items():
+            self.broker.requeue(queue, bodies)
+        for name in self.anon:
+            self.broker.remove_queue(name)
+        self.anon = []
+
+    def kill(self):
+        """Caída externa (SIGKILL): lo no confirmado vuelve a la cola YA (el broker detecta que la
+        conexión se cortó) y lo que el código "zombi" siga haciendo no confirma nada."""
+        self._dead = True
+        with self.broker.cond:
+            self._killed = True
+            self.broker.cond.notify_all()
+        self._release()
 
     def stop(self):
         with self.broker.cond:
@@ -175,6 +263,7 @@ class MessageMiddlewareExchangeRabbitMQ(_Endpoint):
             return self.queue_name
         if self._anon is None:
             self._anon = self.broker.anon_queue()
+            self.rc.anon.append(self._anon)
             self._bind(self._anon)
         return self._anon
 
