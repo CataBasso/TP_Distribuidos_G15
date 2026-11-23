@@ -19,6 +19,7 @@ class WordMapper(BatchStage):
     batch_types = ("tokens_batch",)
     emit_all = True
 
+    #Guarda P y stats, y llama a BatchStage.__init__
     def __init__(self, bus, replica_id: int, upstream_replicas: int, word_partitions: int,
                  flush_every: int = None, state_dir=None):
         self.P = word_partitions

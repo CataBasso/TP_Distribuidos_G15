@@ -1,71 +1,56 @@
 import logging
 
-from common.protocol.messages import (
-    average_data_message, encode, eof_message, q5_articles_batch_message, stage_eof_message,
-)
-from common.stage import EofCounter, Stage
-from common.topology import (
-    AVG_IN, AVG_PEX, LM_CTRL, LM_IN, PERIOD_FROM_2021, PERIOD_UP_TO_2020, Q5_IN, Q5_PEX,
-    STAGE_ABSTRACT_CLEANER, TOK_EX, client_key, partition, queue_of,
-)
+from common.batch_stage import BatchStage
 from common.bus import RabbitBus
-from common.runner import broker_host, env_int, env_str, run_stage
+from common.ft.ids import msg_id
+from common.protocol.messages import (
+    average_data_message, eof_message, q5_articles_batch_message, with_id,
+)
+from common.runner import broker_host, env_int, run_stage, state_dir
+from common.topology import (
+    AVG_IN, AVG_PEX, LM_CTRL, LM_IN, PERIOD_FROM_2021, PERIOD_UP_TO_2020, Q5_IN, Q5_PEX, TOK_EX,
+    client_key, partition, queue_of,
+)
 
 log = logging.getLogger(__name__)
 
 
-class LengthMapper(Stage):
+class LengthMapper(BatchStage):
     name = "length_mapper"
+    ctrl_exchange = LM_CTRL
+    input_queue = LM_IN
+    batch_types = ("tokens_batch",)
+    emit_all = True
 
+    #Guarda A, K y stats, y llama a BatchStage.__init__
     def __init__(self, bus, replica_id: int, upstream_replicas: int, avg_partitions: int,
-                 q5_partitions: int, flush_every: int = 1000):
-        super().__init__(bus)
-        self.replica_id = replica_id
+                 q5_partitions: int, flush_every: int = None, state_dir=None):
         self.A, self.K = avg_partitions, q5_partitions
-        self.flush_every = flush_every
-        self.eofs = EofCounter(upstream_replicas)
-        self._acc = {}
-        self._sent = {}
         self.stats = {"articles": 0, "skipped_null": 0, "unknown_period": 0}
+        super().__init__(bus, replica_id, state_dir)
 
-    def start(self) -> None:
+    #Declara una cola por partición con su clave
+    def declare_outputs(self) -> None:
         for a in range(self.A):
             self.bus.declare(queue_of(AVG_IN, a), AVG_PEX, [str(a)])
         for k in range(self.K):
             self.bus.declare(queue_of(Q5_IN, k), Q5_PEX, [str(k)])
-        self.bus.listen(LM_IN, self.handler(self._on_input), TOK_EX, kind="fanout")
-        self.bus.listen(None, self.handler(self._on_ctrl), LM_CTRL, kind="fanout")
-        self.listen_abort()
 
-    def _on_input(self, message: dict) -> None:
-        if message["type"] == "tokens":
-            self._on_tokens(message)
-        elif message["type"] == "tokens_batch":
-            client_id, batch_id = tuple(message["client_id"]), message.get("batch_id", 0)
-            self._on_batch(client_id, batch_id,
-                           [(url, period, n) for url, _lang, period, n, _words in message["articles"]])
-        elif message["type"] in ("eof", "stage_eof"):
-            ctrl = stage_eof_message(message["client_id"], STAGE_ABSTRACT_CLEANER,
-                                     message.get("origin", 0))
-            self.bus.send(LM_CTRL, encode(ctrl))
-        else:
-            log.warning("length_mapper: tipo inesperado %s", message["type"])
+    #Escucha LM_IN sobre TOK_EX
+    def bind_input(self) -> None:
+        self.bus.listen(LM_IN, self.handler(self._on_data), TOK_EX, kind="fanout")
 
-    def _on_tokens(self, message: dict) -> None:
-        words = message["words"]
-        n = None if words is None else len(words)
-        self._on_batch(tuple(message["client_id"]), message.get("batch_id", 0),
-                       [(message["url"], message["period"], n)])
-
-    def _on_batch(self, client_id, batch_id, articles) -> None:
-        """Procesa un batch completo. Los artículos >= 2021 se agrupan por partición de Q5 y se
-        mandan en un solo mensaje por partición (en vez de uno por artículo)."""
+    #Cuenta artículos por período y longitud, los agrupa por partición y publica
+    def process_batch(self, client_id, message: dict) -> None:
+        batch_id = message.get("batch_id", 0)
+        total = count = 0
         by_partition = {}
-        for url, period, n in articles:
+        for url, _lang, period, n, _words in message["articles"]:
             if n is None:
                 self.stats["skipped_null"] += 1
             elif period == PERIOD_UP_TO_2020:
-                self._accumulate(client_id, n, batch_id)
+                total += n
+                count += 1
                 self.stats["articles"] += 1
             elif period == PERIOD_FROM_2021:
                 by_partition.setdefault(partition(url, self.K), []).append([url, n])
@@ -73,61 +58,30 @@ class LengthMapper(Stage):
             else:
                 self.stats["unknown_period"] += 1
                 log.warning("length_mapper: período desconocido %r", period)
+        if count:
+            a = partition(client_key(client_id), self.A)
+            out = average_data_message(client_id, batch_id, total, count, origin=self.replica_id)
+            self.publish(AVG_PEX, with_id(out, msg_id(client_id, "lm", batch_id, a)), key=str(a))
         for k, rows in by_partition.items():
-            body = encode(q5_articles_batch_message(client_id, rows, batch_id, origin=self.replica_id))
-            self.bus.send(Q5_PEX, body, key=str(k))
+            out = q5_articles_batch_message(client_id, rows, batch_id, origin=self.replica_id)
+            self.publish(Q5_PEX, with_id(out, msg_id(client_id, "lm5", batch_id, k)), key=str(k))
 
-    def _accumulate(self, client_id, n: int, batch_id) -> None:
-        acc = self._acc.get(client_id)
-        if acc is not None and acc[2] != batch_id:
-            self._flush(client_id)
-            acc = None
-        if acc is None:
-            acc = self._acc[client_id] = [0, 0, batch_id]
-        acc[0] += n
-        acc[1] += 1
-        if acc[1] >= self.flush_every:
-            self._flush(client_id)
-
-    def _flush(self, client_id) -> None:
-        acc = self._acc.pop(client_id, None)
-        if acc is None or acc[1] == 0:
-            return
-        total, count, batch_id = acc
-        body = encode(average_data_message(client_id, batch_id, total, count,
-                                           origin=self.replica_id))
-        self._sent[client_id] = self._sent.get(client_id, 0) + 1
-        self.bus.send(AVG_PEX, body, key=str(partition(client_key(client_id), self.A)))
-
-    #Coordinacion de EOFs
-    def _on_ctrl(self, message: dict) -> None:
-        if message["type"] != "stage_eof" or message["stage"] != STAGE_ABSTRACT_CLEANER:
-            return
-        client_id = tuple(message["client_id"])
-        if self.eofs.add(client_id, message["origin"]):
-            self._finish(client_id)
-
-    def _finish(self, client_id) -> None:
-        self._flush(client_id)
-        avg_eof = eof_message(client_id, origin=self.replica_id, total=self._sent.pop(client_id, 0))
-        self.bus.send(AVG_PEX, encode(avg_eof), key=str(partition(client_key(client_id), self.A)))
-        eof = encode(eof_message(client_id, origin=self.replica_id))
+    #Manda un EOF a la partición de AvgReducer del cliente y otro a cada partición de Q5, con origin=replica_id
+    def publish_eof(self, client_id, total: int) -> None:
+        a = partition(client_key(client_id), self.A)
+        eof = eof_message(client_id, origin=self.replica_id)
+        self.publish(AVG_PEX, with_id(eof, msg_id(client_id, "lm-avg-eof", self.replica_id, a)), key=str(a))
         for k in range(self.K):
-            self.bus.send(Q5_PEX, eof, key=str(k))
-        self.eofs.forget(client_id)
+            eof = eof_message(client_id, origin=self.replica_id)
+            self.publish(Q5_PEX, with_id(eof, msg_id(client_id, "lm-q5-eof", self.replica_id, k)), key=str(k))
         log.info("length_mapper[%d]: cliente %s terminado", self.replica_id, client_id)
-
-    def on_abort(self, client_id) -> None:
-        self._acc.pop(client_id, None)
-        self._sent.pop(client_id, None)
-        self.eofs.forget(client_id)
 
 
 def main() -> None:
-    bus = RabbitBus(broker_host())
-    run_stage(LengthMapper(bus, env_int("REPLICA_ID", alt="ID"), env_int("CLEANER_REPLICAS"),
+    rid = env_int("REPLICA_ID", alt="ID")
+    run_stage(LengthMapper(RabbitBus(broker_host()), rid, env_int("CLEANER_REPLICAS"),
                            env_int("AVG_PARTITIONS"), env_int("Q5_PARTITIONS"),
-                           env_int("FLUSH_EVERY", 1000)))
+                           state_dir=state_dir(f"length_mapper_{rid}")))
 
 
 if __name__ == "__main__":
