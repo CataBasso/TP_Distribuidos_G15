@@ -1,3 +1,4 @@
+import os
 import threading
 
 from common.middleware import (
@@ -46,10 +47,11 @@ class RabbitGatewayBroker:
     def open_publisher(self):
         return _RabbitPublisher(self.host, self.year_queue, self.abort_exchange, self.durable)
 
+    #Consume resultados con prefetch de 100 y marca results_ready
     def run_results(self, on_message) -> None:
         if self._stopped:
             return
-        self._results_rc = RabbitConnection(self.host)
+        self._results_rc = RabbitConnection(self.host, prefetch=int(os.environ.get("RESULTS_PREFETCH", "100")))
         results = MessageMiddlewareExchangeRabbitMQ(
             self.host, self.results_exchange, [str(self.gw_id)], exchange_type="direct",
             queue_name=self.results_queue, durable=self.durable, connection=self._results_rc)
@@ -60,6 +62,14 @@ class RabbitGatewayBroker:
         finally:
             self._results_rc.close()
 
+    #Ejecuta un ack en el hilo de la conexión de resultados
+    def defer(self, fn) -> None:
+        rc = self._results_rc
+        if rc is None:
+            return
+        rc.call_threadsafe(fn)
+
+    #Detiene el consumo
     def stop_results(self) -> None:
         self._stopped = True
         if self._results_rc is not None:
