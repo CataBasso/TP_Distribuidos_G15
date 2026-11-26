@@ -340,6 +340,25 @@ def test_una_sesion_que_no_reanuda_a_tiempo_se_aborta(tmp_path):
     g2.stop()
 
 
+def test_un_gateway_detenido_no_aborta_las_sesiones_que_esperaba(tmp_path):
+    """Regresión: el hilo de resultados de un Gateway ya detenido seguía esperando el período de
+    gracia y, al vencer, abortaba y borraba del journal sesiones que otra instancia ya había
+    reanudado (el cliente recibía 'sesión desconocida')."""
+    g1, broker = make(tmp_path)
+    s, cid = connect(g1)
+    send_frame(s, {"type": "batch", "batch_id": 0, "rows": []})
+    broker.get_year()
+    time.sleep(0.2)
+    g1.crash()
+    g2, _ = make(tmp_path, broker, grace=0.5)    # espera a que el cliente reanude...
+    g2.stop()                                    # ...pero se detiene antes de que venza la gracia
+    time.sleep(0.9)                              # vence la gracia del Gateway ya detenido
+    assert broker.aborts.empty()                 # no avisó ningún abort
+    g3, _ = make(tmp_path, broker)               # y la sesión sigue en el journal
+    assert cid[1] in g3.journal.sessions
+    g3.stop()
+
+
 def test_los_resultados_se_confirman_recien_con_el_result_ack_del_cliente(tmp_path):
     g, broker = make(tmp_path)
     s, cid = connect(g)

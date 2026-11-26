@@ -73,6 +73,28 @@ def _svc(name, dockerfile, env, depends=None, context="./src/", volumes=(), port
     return "\n".join(lines)
 
 
+
+PERSISTENT = ("gateway", "abstract_cleaner", "length_mapper", "avg_reducer", "q5_filter",
+              "word_mapper", "word_reducer", "top_merger")
+# Hasta que exista el Supervisor, Docker reinicia solo a los nodos que mueren (no detecta colgados).
+RESTART = "    restart: unless-stopped"
+
+
+def is_persistent(name):
+    return name.rsplit("_", 1)[0] in PERSISTENT or name in PERSISTENT
+
+
+def ft_env(name):
+    """Variables de tolerancia a fallas de un nodo: dónde guarda su estado y un failpoint opcional
+    (FP_<NOMBRE>=after_persist:3 make system-up)."""
+    env = [f"FAILPOINTS=${{FP_{name.upper()}:-}}"]
+    return (["STATE_DIR=/state"] if is_persistent(name) else []) + env
+
+
+def state_volume(name):
+    return [f"{name}_state:/state"] if is_persistent(name) else []
+
+
 def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
     """YAML del docker-compose del escenario s (dict completo)."""
     dataset, _ = SIZES[size]
@@ -81,7 +103,7 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
     out = []
 
     out.append(_svc("rabbitmq", "Dockerfile", ["RABBITMQ_LOG_LEVELS=error"], context="./src/rabbitmq",
-                    image="tpdist/rabbitmq:latest", extra=[f'    cpus: "{rabbit_cpus}"'],
+                    image="tpdist/rabbitmq:latest", extra=[f'    cpus: "{rabbit_cpus}"', RESTART],
                     ports=["5672:5672", "15672:15672"], healthcheck=[
                         "    healthcheck:", "      interval: 5s", "      retries: 10",
                         "      start_period: 50s",
@@ -94,15 +116,17 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
         stage_names.append(name)
         out.append(_svc(name, "gateway/Dockerfile",
                         [f"GATEWAY_ID={g + 1}", "GATEWAY_PORT=5000", "RABBIT_HOST=rabbitmq",
-                         f"WORD_PARTITIONS={s['P']}", f"Q5_PARTITIONS={s['K']}", py], "rabbit",
-                        image="tpdist/gateway:latest", build=(g == 0)))
+                         f"WORD_PARTITIONS={s['P']}", f"Q5_PARTITIONS={s['K']}", py] + ft_env(name),
+                        "rabbit", image="tpdist/gateway:latest", build=(g == 0),
+                        volumes=state_volume(name), extra=[RESTART]))
 
     def replicas(prefix, count, dockerfile, env_of, volumes=()):
         for i in range(count):
             name = f"{prefix}_{i}"
             stage_names.append(name)
-            out.append(_svc(name, dockerfile, [f"ID={i}", mom] + env_of + [py], "rabbit",
-                            image=f"tpdist/{prefix}:latest", build=(i == 0), volumes=volumes))
+            out.append(_svc(name, dockerfile, [f"ID={i}", mom] + env_of + [py] + ft_env(name), "rabbit",
+                            image=f"tpdist/{prefix}:latest", build=(i == 0),
+                            volumes=list(volumes) + state_volume(name), extra=[RESTART]))
 
     replicas("year_filter", s["year"], "filters/year_filter/Dockerfile",
              ["INPUT_QUEUE=year_in", "Q1_QUEUE=q1_in", "Q2_QUEUE=q2_in", "NORM_QUEUE=norm_in"])
@@ -125,8 +149,9 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
              [f"WM_REPLICAS={s['wm']}"])
     stage_names.append("top_merger")
     out.append(_svc("top_merger", "text_processing/top_merger/Dockerfile",
-                    [mom, f"WORD_PARTITIONS={s['P']}", py], "rabbit",
-                    image="tpdist/top_merger:latest"))
+                    [mom, f"WORD_PARTITIONS={s['P']}", py] + ft_env("top_merger"), "rabbit",
+                    image="tpdist/top_merger:latest", volumes=state_volume("top_merger"),
+                    extra=[RESTART]))
 
     for c in range(s["clients"]):
         out.append(_svc(f"client_{c}", "client/Dockerfile",
@@ -137,7 +162,9 @@ def compose(s, size="small", rabbit_cpus=DEFAULT_RABBIT_CPUS):
                         extra=['    profiles: ["clients"]'],
                         volumes=[f"./data/sample/{dataset}:/data:ro", "./output:/output"]))
     header = f"# Generado por tools/scenarios.py -- {describe(s)}\n"
-    return header + "services:\n" + "\n".join(out) + "\nvolumes:\n  image_cache:\n"
+    # stage_names ya incluye a top_merger: sin deduplicar, el volumen quedaría repetido y Compose lo rechaza.
+    state_volumes = "".join(f"  {n}_state:\n" for n in dict.fromkeys(stage_names) if is_persistent(n))
+    return header + "services:\n" + "\n".join(out) + "\nvolumes:\n  image_cache:\n" + state_volumes
 
 
 def write_all(size, random_n, seed, rabbit_cpus=DEFAULT_RABBIT_CPUS):

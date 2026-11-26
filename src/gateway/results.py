@@ -28,6 +28,31 @@ class ResultForwarder:
         gw.journal.close(session.n)
         session.finish()
         logger.info("client_results_completed", LogResult.success, "client_id", session.client_id)
+    
+    #Cuenta un EOF de resultados: lo persiste en el journal (antes de confirmarlo) y, si con él están todos los de la sesión, manda el DONE
+    def _result_eof(self, session: ClientSession, message: dict) -> None:
+        gw = self.gw
+        try:
+            query, origin = message.get("query"), message.get("origin", 0)
+            complete = gw.tracker.add(session.client_id, query, origin)
+            gw.journal.result_eof(session.n, query, origin)     # persistir antes del ack
+        except ValueError as e:
+            logger.warning("invalid_result_eof", LogResult.fail,
+                           "client_id", session.client_id, "reason", e)
+            complete = False
+        if complete:
+            gw.resume.complete.add(session.n)
+            self.send_done(session)
+
+    #Se ejecuta en el hilo de resultados cuando el cliente confirmó todas sus filas: procesa los EOF que estaban esperando y recién entonces los confirma al broker
+    def release_eofs(self, session: ClientSession) -> None:
+        for message, ack in session.release_eofs():
+            try:
+                self._result_eof(session, message)
+            except OSError as e:
+                logger.warning("client_not_responding", LogResult.fail,
+                               "client_id", session.client_id, "error", e)
+            ack()
 
     #Manda DONE, cierra la sesión en el journal y cierra sólo la escritura del socket
     def on_result(self, body: bytes, ack, nack):
@@ -64,17 +89,9 @@ class ResultForwarder:
                 if mid is not None:
                     return
             elif kind == _EOF:
-                try:
-                    query, origin = message.get("query"), message.get("origin", 0)
-                    complete = gw.tracker.add(session.client_id, query, origin)
-                    gw.journal.result_eof(session.n, query, origin)     # persistir antes del ack
-                except ValueError as e:
-                    logger.warning("invalid_result_eof", LogResult.fail,
-                                   "client_id", session.client_id, "reason", e)
-                    complete = False
-                if complete:
-                    gw.resume.complete.add(session.n)
-                    self.send_done(session)
+                if session.defer_eof((message, ack)):
+                    return          
+                self._result_eof(session, message)
             else:
                 logger.error("unknown_result_type", LogResult.fail,
                              "client_id", session.client_id, "type", kind)
@@ -84,3 +101,5 @@ class ResultForwarder:
             if message.get("msg_id") is not None:
                 return      # sigue pendiente: se reenvía si el cliente reanuda, o se libera al cerrar la sesión
         ack()
+
+    

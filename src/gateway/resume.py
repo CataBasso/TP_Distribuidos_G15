@@ -1,5 +1,5 @@
 import threading
-
+import time
 from common.logger import logger
 from common.logger.logger import LogResult
 from common.protocol import error_message, welcome_message
@@ -41,8 +41,10 @@ class ResumeManager:
             gw._sessions[n] = session
         if old is not None and old is not provisional:
             old.superseded = True
-            session.pending.update(old.pending)     
+            session.pending.update(old.pending)    
             old.pending.clear()
+            session.eofs.extend(old.eofs)
+            old.eofs.clear()
             old.close()
         session.eof_sent = rec["eof"] is not None
         self.unresumed.discard(n)
@@ -63,10 +65,17 @@ class ResumeManager:
 
     #Espera hasta RESUME_GRACE y descarta las sesiones que no volvieron
     def wait_and_drop(self) -> None:
-        if self.unresumed:
-            self._resumed.wait(timeout=self.grace)
-            for n in list(self.unresumed):        
-                self._drop(n)
+        gw = self.gw
+        deadline = time.monotonic() + self.grace
+        while self.unresumed and not gw._stop.is_set():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            self._resumed.wait(timeout=min(left, 0.2))
+        for n in list(self.unresumed):               
+            if gw._stop.is_set():
+                return
+            self._drop(n)
 
     #Aborta una sesión no reanudada y la borra del journal
     def _drop(self, n: int) -> None:

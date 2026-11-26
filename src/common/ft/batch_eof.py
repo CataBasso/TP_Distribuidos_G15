@@ -7,7 +7,8 @@ from common.ft.ids import client_key, parse_client_key
 from common.ft.store import StateStore
 
 log = logging.getLogger(__name__)
-DONE_KEPT = 2000  
+DONE_KEPT = 2000
+ANNOUNCE_DONE = 64
 
 
 class BatchEof:
@@ -17,10 +18,10 @@ class BatchEof:
         self.send_control = send_control
         self.on_complete = on_complete
         self.emit_all = emit_all
-        self.own = {}        
-        self.total = {}     
+        self.own = {}       
+        self.total = {}      
         self.holds = set()   
-        self.done = {}     
+        self.done = {}       
         self.others = {}    
         self.aborted = BoundedSet()
         self.store = StateStore(state_dir, self._apply, self._dump, self._load, **journal_kw)
@@ -69,7 +70,6 @@ class BatchEof:
         return ck in self.done or ck in self.aborted
 
     def batch_done(self, client_id, batch_id) -> None:
-        """La réplica terminó de procesar y publicar las salidas del batch."""
         ck = client_key(client_id)
         if ck in self.done or ck in self.aborted:
             return
@@ -80,7 +80,6 @@ class BatchEof:
         self._check(ck)
 
     def eof_seen(self, client_id, total, holds=True) -> None:
-        """Esta réplica consumió el EOF (con el total de batches) de la cola de entrada."""
         ck = client_key(client_id)
         if ck in self.done or ck in self.aborted:
             return
@@ -128,6 +127,9 @@ class BatchEof:
             self._broadcast(ck)
             self.send_control(self._msg(None, None, [], sync=True, client_id=parse_client_key(ck)))
         self.send_control(self._msg(None, None, [], sync=True))
+        for ck in list(self.done)[-ANNOUNCE_DONE:]:      # también lo ya terminado (ver más abajo)
+            total = self.done[ck]
+            self._send(ck, total, [[0, total - 1]] if total else [])
         for ck in self.pending():
             self._check(ck)
 

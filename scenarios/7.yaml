@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: rabbitmq
     cpus: "2.0"
+    restart: unless-stopped
     environment:
     - RABBITMQ_LOG_LEVELS=error
     healthcheck:
@@ -24,6 +25,7 @@ services:
       context: ./src/
       dockerfile: gateway/Dockerfile
     container_name: gateway_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -34,10 +36,15 @@ services:
     - WORD_PARTITIONS=4
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_GATEWAY_0:-}
+    volumes:
+    - gateway_0_state:/state
   gateway_1:
     image: tpdist/gateway:latest
     pull_policy: never
     container_name: gateway_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -48,10 +55,15 @@ services:
     - WORD_PARTITIONS=4
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_GATEWAY_1:-}
+    volumes:
+    - gateway_1_state:/state
   gateway_2:
     image: tpdist/gateway:latest
     pull_policy: never
     container_name: gateway_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -62,10 +74,15 @@ services:
     - WORD_PARTITIONS=4
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_GATEWAY_2:-}
+    volumes:
+    - gateway_2_state:/state
   gateway_3:
     image: tpdist/gateway:latest
     pull_policy: never
     container_name: gateway_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -76,12 +93,17 @@ services:
     - WORD_PARTITIONS=4
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_GATEWAY_3:-}
+    volumes:
+    - gateway_3_state:/state
   year_filter_0:
     image: tpdist/year_filter:latest
     build:
       context: ./src/
       dockerfile: filters/year_filter/Dockerfile
     container_name: year_filter_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -93,10 +115,12 @@ services:
     - Q2_QUEUE=q2_in
     - NORM_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_YEAR_FILTER_0:-}
   year_filter_1:
     image: tpdist/year_filter:latest
     pull_policy: never
     container_name: year_filter_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -108,10 +132,12 @@ services:
     - Q2_QUEUE=q2_in
     - NORM_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_YEAR_FILTER_1:-}
   year_filter_2:
     image: tpdist/year_filter:latest
     pull_policy: never
     container_name: year_filter_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -123,10 +149,12 @@ services:
     - Q2_QUEUE=q2_in
     - NORM_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_YEAR_FILTER_2:-}
   year_filter_3:
     image: tpdist/year_filter:latest
     pull_policy: never
     container_name: year_filter_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -138,12 +166,14 @@ services:
     - Q2_QUEUE=q2_in
     - NORM_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_YEAR_FILTER_3:-}
   q1_filter_0:
     image: tpdist/q1_filter:latest
     build:
       context: ./src/
       dockerfile: filters/q1_filter/Dockerfile
     container_name: q1_filter_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -152,10 +182,12 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=q1_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_Q1_FILTER_0:-}
   q1_filter_1:
     image: tpdist/q1_filter:latest
     pull_policy: never
     container_name: q1_filter_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -164,10 +196,12 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=q1_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_Q1_FILTER_1:-}
   q1_filter_2:
     image: tpdist/q1_filter:latest
     pull_policy: never
     container_name: q1_filter_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -176,10 +210,12 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=q1_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_Q1_FILTER_2:-}
   q1_filter_3:
     image: tpdist/q1_filter:latest
     pull_policy: never
     container_name: q1_filter_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -188,12 +224,14 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=q1_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_Q1_FILTER_3:-}
   q2_filter_0:
     image: tpdist/q2_filter:latest
     build:
       context: ./src/
       dockerfile: filters/q2_filter/Dockerfile
     container_name: q2_filter_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -203,10 +241,12 @@ services:
     - INPUT_QUEUE=q2_in
     - OUTPUT_QUEUE=img_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_Q2_FILTER_0:-}
   q2_filter_1:
     image: tpdist/q2_filter:latest
     pull_policy: never
     container_name: q2_filter_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -216,10 +256,12 @@ services:
     - INPUT_QUEUE=q2_in
     - OUTPUT_QUEUE=img_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_Q2_FILTER_1:-}
   q2_filter_2:
     image: tpdist/q2_filter:latest
     pull_policy: never
     container_name: q2_filter_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -229,10 +271,12 @@ services:
     - INPUT_QUEUE=q2_in
     - OUTPUT_QUEUE=img_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_Q2_FILTER_2:-}
   q2_filter_3:
     image: tpdist/q2_filter:latest
     pull_policy: never
     container_name: q2_filter_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -242,12 +286,14 @@ services:
     - INPUT_QUEUE=q2_in
     - OUTPUT_QUEUE=img_in
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_Q2_FILTER_3:-}
   image_getter_0:
     image: tpdist/image_getter:latest
     build:
       context: ./src/
       dockerfile: image/Dockerfile
     container_name: image_getter_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -257,12 +303,14 @@ services:
     - INPUT_QUEUE=img_in
     - IMAGE_CACHE_DIR=/cache
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_IMAGE_GETTER_0:-}
     volumes:
     - image_cache:/cache
   image_getter_1:
     image: tpdist/image_getter:latest
     pull_policy: never
     container_name: image_getter_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -272,12 +320,14 @@ services:
     - INPUT_QUEUE=img_in
     - IMAGE_CACHE_DIR=/cache
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_IMAGE_GETTER_1:-}
     volumes:
     - image_cache:/cache
   image_getter_2:
     image: tpdist/image_getter:latest
     pull_policy: never
     container_name: image_getter_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -287,12 +337,14 @@ services:
     - INPUT_QUEUE=img_in
     - IMAGE_CACHE_DIR=/cache
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_IMAGE_GETTER_2:-}
     volumes:
     - image_cache:/cache
   image_getter_3:
     image: tpdist/image_getter:latest
     pull_policy: never
     container_name: image_getter_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -302,6 +354,7 @@ services:
     - INPUT_QUEUE=img_in
     - IMAGE_CACHE_DIR=/cache
     - PYTHONUNBUFFERED=1
+    - FAILPOINTS=${FP_IMAGE_GETTER_3:-}
     volumes:
     - image_cache:/cache
   abstract_cleaner_0:
@@ -310,6 +363,7 @@ services:
       context: ./src/
       dockerfile: text_processing/abstract_cleaner/Dockerfile
     container_name: abstract_cleaner_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -318,10 +372,15 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_ABSTRACT_CLEANER_0:-}
+    volumes:
+    - abstract_cleaner_0_state:/state
   abstract_cleaner_1:
     image: tpdist/abstract_cleaner:latest
     pull_policy: never
     container_name: abstract_cleaner_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -330,10 +389,15 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_ABSTRACT_CLEANER_1:-}
+    volumes:
+    - abstract_cleaner_1_state:/state
   abstract_cleaner_2:
     image: tpdist/abstract_cleaner:latest
     pull_policy: never
     container_name: abstract_cleaner_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -342,10 +406,15 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_ABSTRACT_CLEANER_2:-}
+    volumes:
+    - abstract_cleaner_2_state:/state
   abstract_cleaner_3:
     image: tpdist/abstract_cleaner:latest
     pull_policy: never
     container_name: abstract_cleaner_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -354,12 +423,17 @@ services:
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=norm_in
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_ABSTRACT_CLEANER_3:-}
+    volumes:
+    - abstract_cleaner_3_state:/state
   length_mapper_0:
     image: tpdist/length_mapper:latest
     build:
       context: ./src/
       dockerfile: text_processing/length_mapper/Dockerfile
     container_name: length_mapper_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -370,10 +444,15 @@ services:
     - AVG_PARTITIONS=4
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_LENGTH_MAPPER_0:-}
+    volumes:
+    - length_mapper_0_state:/state
   length_mapper_1:
     image: tpdist/length_mapper:latest
     pull_policy: never
     container_name: length_mapper_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -384,10 +463,15 @@ services:
     - AVG_PARTITIONS=4
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_LENGTH_MAPPER_1:-}
+    volumes:
+    - length_mapper_1_state:/state
   length_mapper_2:
     image: tpdist/length_mapper:latest
     pull_policy: never
     container_name: length_mapper_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -398,12 +482,17 @@ services:
     - AVG_PARTITIONS=4
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_LENGTH_MAPPER_2:-}
+    volumes:
+    - length_mapper_2_state:/state
   avg_reducer_0:
     image: tpdist/avg_reducer:latest
     build:
       context: ./src/
       dockerfile: text_processing/avg_reducer/Dockerfile
     container_name: avg_reducer_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -413,10 +502,15 @@ services:
     - LM_REPLICAS=3
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_AVG_REDUCER_0:-}
+    volumes:
+    - avg_reducer_0_state:/state
   avg_reducer_1:
     image: tpdist/avg_reducer:latest
     pull_policy: never
     container_name: avg_reducer_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -426,10 +520,15 @@ services:
     - LM_REPLICAS=3
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_AVG_REDUCER_1:-}
+    volumes:
+    - avg_reducer_1_state:/state
   avg_reducer_2:
     image: tpdist/avg_reducer:latest
     pull_policy: never
     container_name: avg_reducer_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -439,10 +538,15 @@ services:
     - LM_REPLICAS=3
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_AVG_REDUCER_2:-}
+    volumes:
+    - avg_reducer_2_state:/state
   avg_reducer_3:
     image: tpdist/avg_reducer:latest
     pull_policy: never
     container_name: avg_reducer_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -452,12 +556,17 @@ services:
     - LM_REPLICAS=3
     - Q5_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_AVG_REDUCER_3:-}
+    volumes:
+    - avg_reducer_3_state:/state
   q5_filter_0:
     image: tpdist/q5_filter:latest
     build:
       context: ./src/
       dockerfile: filters/q5_filter/Dockerfile
     container_name: q5_filter_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -466,10 +575,15 @@ services:
     - MOM_HOST=rabbitmq
     - LM_REPLICAS=3
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_Q5_FILTER_0:-}
+    volumes:
+    - q5_filter_0_state:/state
   q5_filter_1:
     image: tpdist/q5_filter:latest
     pull_policy: never
     container_name: q5_filter_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -478,10 +592,15 @@ services:
     - MOM_HOST=rabbitmq
     - LM_REPLICAS=3
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_Q5_FILTER_1:-}
+    volumes:
+    - q5_filter_1_state:/state
   q5_filter_2:
     image: tpdist/q5_filter:latest
     pull_policy: never
     container_name: q5_filter_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -490,10 +609,15 @@ services:
     - MOM_HOST=rabbitmq
     - LM_REPLICAS=3
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_Q5_FILTER_2:-}
+    volumes:
+    - q5_filter_2_state:/state
   q5_filter_3:
     image: tpdist/q5_filter:latest
     pull_policy: never
     container_name: q5_filter_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -502,12 +626,17 @@ services:
     - MOM_HOST=rabbitmq
     - LM_REPLICAS=3
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_Q5_FILTER_3:-}
+    volumes:
+    - q5_filter_3_state:/state
   word_mapper_0:
     image: tpdist/word_mapper:latest
     build:
       context: ./src/
       dockerfile: text_processing/word_mapper/Dockerfile
     container_name: word_mapper_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -517,10 +646,15 @@ services:
     - CLEANER_REPLICAS=4
     - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_WORD_MAPPER_0:-}
+    volumes:
+    - word_mapper_0_state:/state
   word_mapper_1:
     image: tpdist/word_mapper:latest
     pull_policy: never
     container_name: word_mapper_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -530,10 +664,15 @@ services:
     - CLEANER_REPLICAS=4
     - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_WORD_MAPPER_1:-}
+    volumes:
+    - word_mapper_1_state:/state
   word_mapper_2:
     image: tpdist/word_mapper:latest
     pull_policy: never
     container_name: word_mapper_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -543,10 +682,15 @@ services:
     - CLEANER_REPLICAS=4
     - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_WORD_MAPPER_2:-}
+    volumes:
+    - word_mapper_2_state:/state
   word_mapper_3:
     image: tpdist/word_mapper:latest
     pull_policy: never
     container_name: word_mapper_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -556,12 +700,17 @@ services:
     - CLEANER_REPLICAS=4
     - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_WORD_MAPPER_3:-}
+    volumes:
+    - word_mapper_3_state:/state
   word_reducer_0:
     image: tpdist/word_reducer:latest
     build:
       context: ./src/
       dockerfile: text_processing/word_reducer/Dockerfile
     container_name: word_reducer_0
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -570,10 +719,15 @@ services:
     - MOM_HOST=rabbitmq
     - WM_REPLICAS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_WORD_REDUCER_0:-}
+    volumes:
+    - word_reducer_0_state:/state
   word_reducer_1:
     image: tpdist/word_reducer:latest
     pull_policy: never
     container_name: word_reducer_1
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -582,10 +736,15 @@ services:
     - MOM_HOST=rabbitmq
     - WM_REPLICAS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_WORD_REDUCER_1:-}
+    volumes:
+    - word_reducer_1_state:/state
   word_reducer_2:
     image: tpdist/word_reducer:latest
     pull_policy: never
     container_name: word_reducer_2
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -594,10 +753,15 @@ services:
     - MOM_HOST=rabbitmq
     - WM_REPLICAS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_WORD_REDUCER_2:-}
+    volumes:
+    - word_reducer_2_state:/state
   word_reducer_3:
     image: tpdist/word_reducer:latest
     pull_policy: never
     container_name: word_reducer_3
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -606,12 +770,17 @@ services:
     - MOM_HOST=rabbitmq
     - WM_REPLICAS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_WORD_REDUCER_3:-}
+    volumes:
+    - word_reducer_3_state:/state
   top_merger:
     image: tpdist/top_merger:latest
     build:
       context: ./src/
       dockerfile: text_processing/top_merger/Dockerfile
     container_name: top_merger
+    restart: unless-stopped
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -619,6 +788,10 @@ services:
     - MOM_HOST=rabbitmq
     - WORD_PARTITIONS=4
     - PYTHONUNBUFFERED=1
+    - STATE_DIR=/state
+    - FAILPOINTS=${FP_TOP_MERGER:-}
+    volumes:
+    - top_merger_state:/state
   client_0:
     image: tpdist/client:latest
     build:
@@ -638,7 +811,7 @@ services:
     - OUTPUT_DIR=/output/client_0
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/large_dataset:/data:ro
+    - ./data/sample/small_dataset:/data:ro
     - ./output:/output
   client_1:
     image: tpdist/client:latest
@@ -657,7 +830,7 @@ services:
     - OUTPUT_DIR=/output/client_1
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/large_dataset:/data:ro
+    - ./data/sample/small_dataset:/data:ro
     - ./output:/output
   client_2:
     image: tpdist/client:latest
@@ -676,7 +849,35 @@ services:
     - OUTPUT_DIR=/output/client_2
     - PYTHONUNBUFFERED=1
     volumes:
-    - ./data/sample/large_dataset:/data:ro
+    - ./data/sample/small_dataset:/data:ro
     - ./output:/output
 volumes:
   image_cache:
+  gateway_0_state:
+  gateway_1_state:
+  gateway_2_state:
+  gateway_3_state:
+  abstract_cleaner_0_state:
+  abstract_cleaner_1_state:
+  abstract_cleaner_2_state:
+  abstract_cleaner_3_state:
+  length_mapper_0_state:
+  length_mapper_1_state:
+  length_mapper_2_state:
+  avg_reducer_0_state:
+  avg_reducer_1_state:
+  avg_reducer_2_state:
+  avg_reducer_3_state:
+  q5_filter_0_state:
+  q5_filter_1_state:
+  q5_filter_2_state:
+  q5_filter_3_state:
+  word_mapper_0_state:
+  word_mapper_1_state:
+  word_mapper_2_state:
+  word_mapper_3_state:
+  word_reducer_0_state:
+  word_reducer_1_state:
+  word_reducer_2_state:
+  word_reducer_3_state:
+  top_merger_state:

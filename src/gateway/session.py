@@ -16,6 +16,7 @@ class ClientSession:
         self._closed = False
         self.superseded = False   # otra conexión reanudó esta sesión
         self.pending = {}        # msg_id -> ack del broker: resultados enviados que el cliente aún no confirmó
+        self.eofs = []           # EOF de resultados que esperan a que el cliente confirme todas las filas
         self._pending_lock = threading.Lock()
 
     #Envía bajo lock (dos hilos escriben en el mismo socket)
@@ -36,6 +37,22 @@ class ClientSession:
             entry = self.pending.pop(msg_id, None)
         return entry[0] if entry else None
 
+    #Si hay EOF de resultados y no quedan filas pendientes, se guarda para procesarlo después
+    def defer_eof(self, item) -> bool:
+        with self._pending_lock:
+            if self.pending:
+                self.eofs.append(item)
+                return True
+        return False
+
+    #Devuelve (y vacía) los EOF guardados, pero sólo cuando ya no queda ninguna fila sin confirmar
+    def release_eofs(self) -> list:
+        with self._pending_lock:
+            if self.pending or not self.eofs:
+                return []
+            items, self.eofs = self.eofs, []
+            return items
+
     #Devuelve los mensajes pendientes de confirmación (para reenviarlos al reconectar)
     def unconfirmed(self) -> list:
         with self._pending_lock:
@@ -44,8 +61,9 @@ class ClientSession:
     #Vacía los pendientes y devuelve sus acks
     def drain_pending(self) -> list:
         with self._pending_lock:
-            acks = [ack for ack, _m in self.pending.values()]
+            acks = [ack for ack, _m in self.pending.values()] + [ack for _m, ack in self.eofs]
             self.pending.clear()
+            self.eofs.clear()
             return acks
 
     #Luego de DONE, shutdown(SHUT_WR) sin cerrar el socket

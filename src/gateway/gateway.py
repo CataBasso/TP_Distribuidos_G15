@@ -182,6 +182,8 @@ class Gateway:
                     ack = session.confirm(message["msg_id"])
                     if ack is not None:
                         self.broker.defer(ack)
+                    if session.eofs and not session.pending:
+                        self.broker.defer(lambda s=session: self.results.release_eofs(s))
                 else:
                     session.send(error_message("invalid_message", f"mensaje inesperado: {kind}",
                                                cid))
@@ -250,7 +252,9 @@ class Gateway:
     #Espera o descarta las sesiones por reanudar y consume resultados
     def _results_loop(self):
         try:
-            self.resume.wait_and_drop()                  
+            self.resume.wait_and_drop()
+            if self._stop.is_set():
+                return                
             self.broker.run_results(self.results.on_result)
         except Exception as e:
             if not self._stop.is_set():
