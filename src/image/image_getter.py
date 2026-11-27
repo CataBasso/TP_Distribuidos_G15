@@ -1,28 +1,21 @@
-from common.bounded_set import BoundedSet
 import hashlib
 import json
 import logging
 import os
-import signal
 import time
 from collections import defaultdict
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from common.middleware.middleware_rabbitmq import (
-    RabbitConnection, MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ,
-)
-from common.protocol import internal, messages
 
-ID = int(os.environ["ID"])
-MOM_HOST = os.environ["MOM_HOST"]
-INPUT_QUEUE = os.environ.get("INPUT_QUEUE", "img_in")
+from common.batch_stage import BatchStage
+from common.ft.ids import msg_id
+from common.protocol.messages import result_message, eof_message, with_id
+from common.topology import IMG_CTRL, RESULTS_EX, results_key
+
 USER_AGENT = os.environ.get("USER_AGENT", "SD1-TP-WikipediaAnalysis/1.0 (TP facultad; vfernandezd@fi.uba.ar)")
-RESULTS_EXCHANGE = "results_ex"
-IMG_CONTROL_EXCHANGE = "img_ctrl"
-ABORT_EXCHANGE = "abort_ex"
-STAGE = "img"
+STAGE = "img_getter"
 QUERY = 2
 TITLES_PER_REQUEST = 50    
 RETRIES = 5
@@ -183,127 +176,31 @@ def fetch_images(rows, wiki, cache=None, rounds=ROUNDS, sleep=ROUND_SLEEP):
             for row in rows]
 
 
-class ImageGetter:
-    def __init__(self, wiki=None):
-        self.id = ID
+class ImageGetter(BatchStage):
+    name = STAGE
+    ctrl_exchange = IMG_CTRL
+
+    def __init__(self, bus, replica_id, input_queue="img_in", state_dir=None, wiki=None):
+        self.input_queue = input_queue
         self.wiki = wiki or WikimediaClient()
         self.cache = ImageCache(CACHE_DIR) if CACHE_DIR else None
-        self.rc = RabbitConnection(MOM_HOST)
-        self.input = MessageMiddlewareQueueRabbitMQ(MOM_HOST, INPUT_QUEUE, connection=self.rc)
-        self.results = MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, RESULTS_EXCHANGE, [], exchange_type="direct", connection=self.rc)
-        self.control = MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, IMG_CONTROL_EXCHANGE, [], exchange_type="fanout", connection=self.rc)
-        self.abort = MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, ABORT_EXCHANGE, [], exchange_type="fanout", connection=self.rc)
+        super().__init__(bus, replica_id, state_dir)
 
-        self.count = {}         
-        self.eof_total = {}    
-        self.reported = {}      
-        self.holds_eof = set()  
-        self.done = BoundedSet()
-        self.aborted = BoundedSet()
+    def process_batch(self, client_id, message):
+        out = result_message(client_id, QUERY, fetch_images(message["rows"], self.wiki, self.cache), origin=self.replica_id)
+        self.publish(RESULTS_EX, with_id(out, msg_id(client_id, STAGE, message["batch_id"])), key=results_key(client_id))
 
-    def _send(self, message, client_id):
-        self.results.send(internal.serialize(message), routing_key=str(client_id[0]))
-
-    def on_data(self, body, ack, nack):
-        message = internal.deserialize(body)
-        client_id = messages.client_id_of(message)
-        if client_id not in self.aborted:
-            if message["type"] == "batch":
-                self._on_batch(client_id, message)
-            elif message["type"] in ("eof", "stage_eof"):
-                self._on_eof(client_id, message)
-            else:
-                logging.warning("tipo inesperado en img_in: %s", message["type"])
-        ack()
-
-    def _on_batch(self, client_id, message):
-        rows = fetch_images(message["rows"], self.wiki, self.cache)
-        self._send(messages.result_message(client_id, QUERY, rows, origin=self.id), client_id)
-        self.count[client_id] = self.count.get(client_id, 0) + 1
-        if client_id in self.eof_total:
-            self._broadcast(client_id)
-
-    def _on_eof(self, client_id, message):
-        if "total" not in message:
-            raise ValueError("el EOF de img_in debe traer el total de batches")
-        self.holds_eof.add(client_id)
-        self._learn_total(client_id, message["total"])
-
-    def _broadcast(self, client_id):
-        self.control.send(internal.serialize(messages.control_message(
-            client_id, STAGE, self.id, self.count.get(client_id, 0),
-            total=self.eof_total.get(client_id))))
-
-    def _learn_total(self, client_id, total):
-        if client_id not in self.eof_total:
-            self.eof_total[client_id] = total
-            self._broadcast(client_id)
-
-    def on_control(self, body, ack, nack):
-        message = internal.deserialize(body)
-        client_id = messages.client_id_of(message)
-        if client_id not in self.done and client_id not in self.aborted:
-            if message.get("total") is not None:
-                self._learn_total(client_id, message["total"])
-            reported = self.reported.setdefault(client_id, {})
-            replica = message["replica"]
-            reported[replica] = max(reported.get(replica, 0), message["count"])
-            total = self.eof_total.get(client_id)
-            if total is not None and sum(reported.values()) >= total:
-                self._flush(client_id)
-        ack()
-
-    def _flush(self, client_id):
-        total = self.eof_total.pop(client_id)
-        self.count.pop(client_id, None)
-        self.reported.pop(client_id, None)
-        self.done.add(client_id)
-        if client_id in self.holds_eof: 
-            self.holds_eof.discard(client_id)
-            self._send(messages.eof_message(
-                client_id, origin=self.id, query=QUERY, total=total), client_id)
-
-    def on_abort(self, body, ack, nack):
-        client_id = messages.client_id_of(internal.deserialize(body))
-        self.aborted.add(client_id)
-        for state in (self.count, self.eof_total, self.reported):
-            state.pop(client_id, None)
-        self.holds_eof.discard(client_id)
-        ack()
-
-    def setup_consumers(self):
-        self.control.consume(self.on_control)
-        self.abort.consume(self.on_abort)
-        self.input.consume(self.on_data)
-
-    def start(self):
-        signal.signal(signal.SIGTERM, lambda signum, frame: self.rc.stop())
-        self.setup_consumers()
-        try:
-            self.rc.run()
-        finally:
-            self.close()
-
-    def close(self):
-        for name, endpoint in [("input", self.input), ("results", self.results),
-                               ("control", self.control), ("abort", self.abort)]:
-            try:
-                endpoint.close()
-            except Exception as e:
-                logging.error(f"Error al cerrar '{name}': {e}")
-        try:
-            self.rc.close()
-        except Exception as e:
-            logging.error(f"Error al cerrar la conexión: {e}")
+    def publish_eof(self, client_id, total):
+        eof = eof_message(client_id, origin=self.replica_id)
+        eof["query"] = QUERY
+        self.publish(RESULTS_EX, with_id(eof, msg_id(client_id, STAGE + "-eof")), key=results_key(client_id))
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
-    ImageGetter().start()
-    return 0
+    from common.bus import RabbitBus
+    from common.runner import broker_host, env_int, env_str, run_stage, state_dir
+    rid = env_int("ID")
+    run_stage(ImageGetter(RabbitBus(broker_host()), rid, env_str("INPUT_QUEUE","img_in"),state_dir(f"image_getter_{rid}")))
 
 
 if __name__ == "__main__":

@@ -1,25 +1,13 @@
-from common.bounded_set import BoundedSet
 import json
 import logging
-import os
-import signal
 
-from common.middleware.middleware_rabbitmq import (
-    RabbitConnection,
-    MessageMiddlewareQueueRabbitMQ,
-    MessageMiddlewareExchangeRabbitMQ,
-)
-from common.protocol import internal, messages
+from common.batch_stage import BatchStage
+from common.ft.ids import msg_id
+from common.protocol.messages import batch_message, stage_eof_message, with_id
+from common.topology import Q2_CTRL
 
-ID = int(os.environ["ID"])
-MOM_HOST = os.environ["MOM_HOST"]
-INPUT_QUEUE = os.environ["INPUT_QUEUE"]
-OUTPUT_QUEUE = os.environ["OUTPUT_QUEUE"]
-Q2_CONTROL_EXCHANGE = "q2_ctrl"
-ABORT_EXCHANGE = "abort_ex"
-STAGE = "q2"
+STAGE = "q2_filter"
 BIOGRAPHY_SECTIONS = {"biography", "biographie"}  
-
 
 def section_names(sections):
     result = set()
@@ -38,125 +26,34 @@ def biography_rows(rows):
             logging.warning("fila inválida (%s: %s), se descarta", type(e).__name__, e)
     return result
 
-class Q2Filter:
-    def __init__(self):
-        self.id = ID
-        self.rc = RabbitConnection(MOM_HOST)
-        self.input = MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, INPUT_QUEUE, connection=self.rc)
-        self.output = MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, OUTPUT_QUEUE, connection=self.rc)
-        self.control = MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, Q2_CONTROL_EXCHANGE, [], exchange_type="fanout", connection=self.rc)
-        self.abort = MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, ABORT_EXCHANGE, [], exchange_type="fanout", connection=self.rc)
+class Q2Filter(BatchStage):
+    name = STAGE
+    ctrl_exchange = Q2_CTRL
 
-        self.count = {}         
-        self.eof_total = {}    
-        self.reported = {}      
-        self.holds_eof = set()  
-        self.done = BoundedSet()
-        self.aborted = BoundedSet()
+    def __init__(self, bus, replica_id, input_queue="q2_in", output_queue = "img_in", state_dir=None):
+        self.input_queue = input_queue
+        self.output_queue = output_queue
+        super().__init__(bus, replica_id, state_dir)
 
-    def on_data(self, body, ack, nack):
-        message = internal.deserialize(body)
-        client_id = messages.client_id_of(message)
-        if client_id not in self.aborted:
-            if message["type"] == "batch":
-                self._on_batch(client_id, message)
-            elif message["type"] in ("eof", "stage_eof"):
-                self._on_eof(client_id, message)
-            else:
-                logging.warning("tipo inesperado en q2_in: %s", message["type"])
-        ack()
+    def declare_outputs(self):
+        self.bus.declare(self.output_queue)
 
-    def _on_batch(self, client_id, message):
-        rows = biography_rows(message["rows"])
-        self.output.send(internal.serialize(messages.batch_message(
-            client_id, message["batch_id"], rows, origin=self.id)))
-        self.count[client_id] = self.count.get(client_id, 0) + 1
-        if client_id in self.eof_total:
-            self._broadcast(client_id)
+    def process_batch(self, client_id, message):
+        batch_id = message['batch_id']
+        out = batch_message(client_id, batch_id, biography_rows(message["rows"]), origin=self.replica_id)
+        self.publish("", with_id(out, msg_id(client_id, STAGE, batch_id)), key=self.output_queue)
 
-    def _on_eof(self, client_id, message):
-        if "total" not in message:
-            raise ValueError("el EOF de q2_in debe traer el total de batches")
-        self.holds_eof.add(client_id)
-        self._learn_total(client_id, message["total"])
-
-    def _broadcast(self, client_id):
-        self.control.send(internal.serialize(messages.control_message(
-            client_id, STAGE, self.id, self.count.get(client_id, 0),
-            total=self.eof_total.get(client_id))))
-
-    def _learn_total(self, client_id, total):
-        if client_id not in self.eof_total:
-            self.eof_total[client_id] = total
-            self._broadcast(client_id)
-
-    def on_control(self, body, ack, nack):
-        message = internal.deserialize(body)
-        client_id = messages.client_id_of(message)
-        if client_id not in self.done and client_id not in self.aborted:
-            if message.get("total") is not None:
-                self._learn_total(client_id, message["total"])
-            reported = self.reported.setdefault(client_id, {})
-            replica = message["replica"]
-            reported[replica] = max(reported.get(replica, 0), message["count"])
-            total = self.eof_total.get(client_id)
-            if total is not None and sum(reported.values()) >= total:
-                self._flush(client_id)
-        ack()
-
-    def _flush(self, client_id):
-        total = self.eof_total.pop(client_id)
-        self.count.pop(client_id, None)
-        self.reported.pop(client_id, None)
-        self.done.add(client_id)
-        if client_id in self.holds_eof:  
-            self.holds_eof.discard(client_id)
-            self.output.send(internal.serialize(messages.stage_eof_message(
-                client_id, STAGE, self.id, total=total)))
-
-    def on_abort(self, body, ack, nack):
-        client_id = messages.client_id_of(internal.deserialize(body))
-        self.aborted.add(client_id)
-        for state in (self.count, self.eof_total, self.reported):
-            state.pop(client_id, None)
-        self.holds_eof.discard(client_id)
-        ack()
-
-    def setup_consumers(self):
-        self.control.consume(self.on_control)
-        self.abort.consume(self.on_abort)
-        self.input.consume(self.on_data)
-
-    def start(self):
-        signal.signal(signal.SIGTERM, lambda signum, frame: self.rc.stop())
-        self.setup_consumers()
-        try:
-            self.rc.run()
-        finally:
-            self.close()
-
-    def close(self):
-        for name, endpoint in [("input", self.input), ("output", self.output),
-                               ("control", self.control), ("abort", self.abort)]:
-            try:
-                endpoint.close()
-            except Exception as e:
-                logging.error(f"Error al cerrar '{name}': {e}")
-        try:
-            self.rc.close()
-        except Exception as e:
-            logging.error(f"Error al cerrar la conexión: {e}")
+    def publish_eof(self, client_id, total):
+        eof = stage_eof_message(client_id, STAGE, self.replica_id, total=total)
+        self.publish("", with_id(eof, msg_id(client_id, STAGE + "-eof")), key=self.output_queue)
 
 def main():
-    logging.basicConfig(level=logging.INFO)
-    q2_filter = Q2Filter()
-    q2_filter.start()
-    return 0
-
+    from common.bus import RabbitBus
+    from common.runner import broker_host, env_int, env_str, run_stage, state_dir
+    rid = env_int("ID")
+    run_stage(Q2Filter(RabbitBus(broker_host()), rid, env_str("INPUT_QUEUE", "q2_in"),
+                       env_str("OUTPUT_QUEUE", "img_in"), state_dir(f"q2_filter_{rid}")))
 
 if __name__ == "__main__":
     main()
+
