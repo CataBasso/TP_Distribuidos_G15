@@ -7,11 +7,8 @@ import threading
 import time
 from pathlib import Path
 
-os.environ.update({"ID": "0", "MOM_HOST": "fake", "INPUT_QUEUE": "year_in", "Q1_QUEUE": "q1_in",
-                   "Q2_QUEUE": "q2_in", "NORM_QUEUE": "norm_in", "OUTPUT_QUEUE": "img_in"})
-
-import fake_rabbit  # noqa: E402
-import scenarios as scn  # noqa: E402
+import fake_rabbit
+import scenarios as scn
 
 DATASET = os.environ.get("DATASET", "data/sample/small_dataset")
 EXPECTED = os.environ.get("EXPECTED_DIR", "data/expected/small")
@@ -34,21 +31,13 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
     fake_rabbit.install()
     for m in [m for m in sys.modules if m.split(".")[0] in PURGE]:
         del sys.modules[m]
-    import importlib
-
-    def load(module, input_queue=None, output_queue=None):
-        if input_queue:
-            os.environ["INPUT_QUEUE"] = input_queue
-        if output_queue:
-            os.environ["OUTPUT_QUEUE"] = output_queue
-        return importlib.import_module(module)
 
     from common.bus import RabbitBus
-    q1 = load("filters.q1_filter.query1", "q1_in")
-    q2 = load("filters.q2_filter.query2", "q2_in", "img_in")
-    yf = load("filters.year_filter.year_filter", "year_in")
-    ig = load("image.image_getter", "img_in")
+    from filters.q1_filter.query1 import Q1Filter
+    from filters.q2_filter.query2 import Q2Filter
     from filters.q5_filter.q5_filter import Q5Filter
+    from filters.year_filter.year_filter import YearFilter
+    from image.image_getter import ImageGetter
     from text_processing.abstract_cleaner.abstract_cleaner import AbstractCleaner
     from common.topology import expected_result_eofs
     from text_processing.avg_reducer.avg_reducer import AvgReducer
@@ -64,13 +53,6 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
 
     def spawn(name, fn):
         threading.Thread(target=fn, name=name, daemon=True).start()
-
-    def real(mod, cls, i, *a, **kw):           # componentes de la otra gente (aún sin migrar): leen ID del módulo
-        mod.ID = i
-        c = getattr(mod, cls)(*a, **kw)
-        c.setup_consumers()
-        stops.append(c.rc.stop)
-        spawn(f"{cls}{i}", c.rc.run)
 
     def mine(stage):                           # start() + bus.run() en su propio hilo
         stage.start()
@@ -93,13 +75,13 @@ def run(s, data_dir=DATASET, output_dir=None, timeout=120):
     for i in range(AC):
         mine(AbstractCleaner(bus(), i, "norm_in"))
     for i in range(s["img"]):
-        real(ig, "ImageGetter", i, wiki=StubWiki())
+        mine(ImageGetter(bus(), i, "img_in", wiki=StubWiki()))
     for i in range(s["q1"]):
-        real(q1, "Q1Filter", i)
+        mine(Q1Filter(bus(), i, "q1_in"))
     for i in range(s["q2"]):
-        real(q2, "Q2Filter", i)
+        mine(Q2Filter(bus(), i, "q2_in", "img_in"))
     for i in range(s["year"]):
-        real(yf, "YearFilter", i)
+        mine(YearFilter(bus(), i, "year_in"))
 
     gateways = [Gateway(g + 1, RabbitGatewayBroker("fake", g + 1), "127.0.0.1", 0,
                         expected_eofs=expected_result_eofs(P, K)) for g in range(s["gw"])]

@@ -125,14 +125,15 @@ def test_binary_values_in_rows_and_results_survive_the_round_trip(gw):
     assert recv_frame(s)["rows"][0]["image"] == b"\x00\xff"
 
 
-def test_stop_aborts_clients_in_flight_and_closes_connections():
+def test_stop_cierra_conexiones_pero_no_aborta_porque_la_sesion_es_reanudable():
     broker = InMemoryBroker()
     gateway = Gateway(1, broker, "127.0.0.1", 0)
     gateway.start()
     s, cid = connect(gateway)
     gateway.stop()
-    assert broker.get_abort()["client_id"] == cid
     assert recv_frame(s) is None
+    time.sleep(0.2)
+    assert broker.aborts.empty()                 # el cliente puede reanudar cuando el Gateway vuelva
 
 
 def test_many_concurrent_clients_get_their_own_results(gw):
@@ -266,3 +267,109 @@ def test_bounded_set_forgets_oldest_only():
     for i in range(5):
         s.add(i)
     assert 0 not in s and 1 not in s and all(i in s for i in (2, 3, 4)) and len(s) == 3
+
+
+# --- tolerancia a fallas: journal de sesiones y reanudación ------------------------------------
+def make(tmp_path, broker=None, grace=5):
+    broker = broker or InMemoryBroker()
+    g = Gateway(gw_id=3, broker=broker, host="127.0.0.1", port=0, state_dir=str(tmp_path),
+                resume_grace=grace)
+    g.start()
+    return g, broker
+
+
+def test_el_cliente_reanuda_despues_de_que_el_gateway_cae_y_no_se_reusa_el_client_id(tmp_path):
+    g1, broker = make(tmp_path)
+    s, cid = connect(g1)
+    send_frame(s, {"type": "batch", "batch_id": 0, "rows": [{"url": "u1"}]})
+    send_frame(s, {"type": "batch", "batch_id": 1, "rows": [{"url": "u2"}]})
+    broker.get_year(); broker.get_year()
+    time.sleep(0.2)
+    g1.crash()                                   # el Gateway cae: no hay abort
+    g2, _ = make(tmp_path, broker)               # y vuelve con el mismo directorio de estado
+    s2 = socket.create_connection(("127.0.0.1", g2.port), timeout=5)
+    assert recv_frame(s2)["type"] == "welcome"   # sesión provisoria
+    send_frame(s2, {"type": "resume", "client_id": cid})
+    w = recv_frame(s2)
+    assert w["resumed"] is True and w["next_batch"] == 2 and w["eof_sent"] is False
+    send_frame(s2, {"type": "batch", "batch_id": 2, "rows": [{"url": "u3"}]})
+    assert broker.get_year()["batch_id"] == 2    # continúa donde quedó, sin repetir ids
+    assert broker.aborts.empty()
+    _, other = connect(g2)
+    assert other[1] > cid[1]                     # un client_id nuevo nunca coincide con uno viejo
+    g2.stop()
+
+
+def test_si_el_cliente_ya_mando_el_eof_la_reanudacion_lo_informa(tmp_path):
+    g1, broker = make(tmp_path)
+    s, cid = connect(g1)
+    send_frame(s, {"type": "batch", "batch_id": 0, "rows": []})
+    send_frame(s, {"type": "eof"})
+    broker.get_year(); eof = broker.get_year()
+    assert eof["total"] == 1
+    time.sleep(0.2)
+    g1.crash()
+    g2, _ = make(tmp_path, broker)
+    s2 = socket.create_connection(("127.0.0.1", g2.port), timeout=5)
+    recv_frame(s2)
+    send_frame(s2, {"type": "resume", "client_id": cid})
+    w = recv_frame(s2)
+    assert w["eof_sent"] is True and w["next_batch"] == 1
+    g2.stop()
+
+
+def test_resume_de_una_sesion_desconocida_recibe_error(tmp_path):
+    g, _ = make(tmp_path)
+    s = socket.create_connection(("127.0.0.1", g.port), timeout=5)
+    recv_frame(s)
+    send_frame(s, {"type": "resume", "client_id": (3, 12345)})
+    err = recv_frame(s)
+    assert err["type"] == "error" and err["code"] == "unknown_session"
+    g.stop()
+
+
+def test_una_sesion_que_no_reanuda_a_tiempo_se_aborta(tmp_path):
+    g1, broker = make(tmp_path)
+    s, cid = connect(g1)
+    send_frame(s, {"type": "batch", "batch_id": 0, "rows": []})
+    broker.get_year()
+    time.sleep(0.2)
+    g1.crash()
+    g2, _ = make(tmp_path, broker, grace=0.3)    # nadie reanuda
+    assert broker.get_abort()["client_id"] == cid
+    g2.stop()
+
+
+def test_un_gateway_detenido_no_aborta_las_sesiones_que_esperaba(tmp_path):
+    """Regresión: el hilo de resultados de un Gateway ya detenido seguía esperando el período de
+    gracia y, al vencer, abortaba y borraba del journal sesiones que otra instancia ya había
+    reanudado (el cliente recibía 'sesión desconocida')."""
+    g1, broker = make(tmp_path)
+    s, cid = connect(g1)
+    send_frame(s, {"type": "batch", "batch_id": 0, "rows": []})
+    broker.get_year()
+    time.sleep(0.2)
+    g1.crash()
+    g2, _ = make(tmp_path, broker, grace=0.5)    # espera a que el cliente reanude...
+    g2.stop()                                    # ...pero se detiene antes de que venza la gracia
+    time.sleep(0.9)                              # vence la gracia del Gateway ya detenido
+    assert broker.aborts.empty()                 # no avisó ningún abort
+    g3, _ = make(tmp_path, broker)               # y la sesión sigue en el journal
+    assert cid[1] in g3.journal.sessions
+    g3.stop()
+
+
+def test_los_resultados_se_confirman_recien_con_el_result_ack_del_cliente(tmp_path):
+    g, broker = make(tmp_path)
+    s, cid = connect(g)
+    broker.publish_result({"type": "result", "client_id": cid, "query": 3, "msg_id": "m1",
+                           "rows": [{"word": "a"}]})
+    assert recv_frame(s)["msg_id"] == "m1"
+    time.sleep(0.2)
+    assert broker.acked == 0                     # sin ack del cliente el broker lo reentregaría
+    send_frame(s, {"type": "result_ack", "msg_id": "m1"})
+    deadline = time.time() + 3
+    while broker.acked < 1 and time.time() < deadline:
+        time.sleep(0.02)
+    assert broker.acked == 1
+    g.stop()

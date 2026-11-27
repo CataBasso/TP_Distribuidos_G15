@@ -156,3 +156,28 @@ test-scenarios:            ##SIN Docker: corre todos los escenarios fijos en un 
 
 test-random:               ##SIN Docker: N escenarios aleatorios (make test-random RANDOM_N=10 SEED=3)
 	PYTHONPATH=src:tests:tools $(VENV)/bin/python tests/real_flow.py --random $(or $(RANDOM_N),10) --seed $(or $(SEED),0)
+
+.PHONY: test-ft test-ft-quick chaos test-chaos kill-stage
+
+test-ft-quick:             
+	PYTHONPATH=src:tests:tools $(PYTEST) tests/test_ft_base.py tests/test_ft_eof.py \
+		tests/test_chaos_monkey.py tests/test_gateway.py -v
+
+test-ft:                  
+	PYTHONPATH=src:tests:tools $(PYTEST) tests/test_fault_tolerance.py -v
+
+chaos:                    
+	python3 tools/chaos_monkey.py --duration $(or $(DURATION),60) --interval $(or $(INTERVAL),5) $(CHAOS_ARGS)
+
+kill-stage:                
+	python3 tools/chaos_monkey.py --scenario stage:$(STAGE) --once
+
+
+test-chaos: build         
+	mkdir -p output logs
+	$(CLEAN_OUTPUT)
+	$(COMPOSE_ALL) down -v --remove-orphans
+	$(MAKE) --no-print-directory system-up run-clients
+	python3 tools/chaos_monkey.py --duration $(or $(DURATION),40) --interval $(or $(INTERVAL),6) $(CHAOS_ARGS) & \
+	python3 tools/verify_output.py --wait --expected data/expected/$(or $(SIZE),small); EXIT_CODE=$$?; \
+	wait; exit $$EXIT_CODE
