@@ -5,9 +5,6 @@ import sys
 import time
 
 PROTECTED = ("rabbitmq", "client_")
-# Etapas que todavía no persisten estado (Victoria #18): matarlas en Docker puede perder resultados.
-# Con --all se incluyen igual. Borrar esta tupla cuando se migren.
-NOT_YET_FT = ("year_filter_", "q1_filter_", "q2_filter_", "image_getter_")
 
 #Nombres de los contenedores en ejecución del compose actual
 def list_containers(runner=None):
@@ -20,19 +17,17 @@ def _docker(args):
     return subprocess.run(["docker"] + args, capture_output=True, text=True, check=False).stdout
 
 
-def eligible(names, include_all=False):
+def eligible(names):
     out = []
     for n in names:
         if n.startswith(PROTECTED):
-            continue
-        if n.startswith(NOT_YET_FT) and not include_all:
             continue
         out.append(n)
     return out
 
 #Devuelve la lista de contenedores a matar para el escenario dado
-def pick_victims(scenario, names, rng, include_all=False):
-    pool = eligible(names, include_all)
+def pick_victims(scenario, names, rng):
+    pool = eligible(names)
     if scenario == "random":
         return [rng.choice(pool)] if pool else []
     if scenario == "gateway":
@@ -60,8 +55,6 @@ def main(argv=None):
     p.add_argument("--interval", type=float, default=5.0, help="segundos entre ataques (random)")
     p.add_argument("--duration", type=float, default=60.0, help="segundos totales (random)")
     p.add_argument("--once", action="store_true", help="un solo ataque y termina")
-    p.add_argument("--all", action="store_true",
-                   help="incluir también a las etapas que todavía no persisten estado")
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args(argv)
@@ -69,7 +62,7 @@ def main(argv=None):
     deadline = time.time() + a.duration
     while True:
         names = list_containers()
-        victims = pick_victims(a.scenario, names, rng, a.all)
+        victims = pick_victims(a.scenario, names, rng)
         if not victims:
             print("[chaos] no hay víctimas elegibles ")
         kill(victims, a.dry_run)

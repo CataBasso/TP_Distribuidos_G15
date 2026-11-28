@@ -7,11 +7,8 @@ import threading
 import time
 from pathlib import Path
 
-os.environ.update({"ID": "0", "MOM_HOST": "fake", "INPUT_QUEUE": "year_in", "Q1_QUEUE": "q1_in",
-                   "Q2_QUEUE": "q2_in", "NORM_QUEUE": "norm_in", "OUTPUT_QUEUE": "img_in"})
-
-import fake_rabbit  # noqa: E402
-import scenarios as scn  # noqa: E402
+import fake_rabbit
+import scenarios as scn
 
 DATASET = os.environ.get("DATASET", "data/sample/small_dataset")
 EXPECTED = os.environ.get("EXPECTED_DIR", "data/expected/small")
@@ -24,34 +21,6 @@ class StubWiki:
 
     def download(self, url):
         return b"img:" + url.encode()
-
-
-class Legacy:
-    """Adaptador para las etapas de Victoria que todavía no migraron a Stage (YearFilter, Q1, Q2,
-    ImageGetter): leen ID del módulo y tienen su propia conexión. No tienen estado persistente,
-    por eso el arnés NO las mata (ver LEGACY). Cuando se migren, borrar este adaptador."""
-
-    def __init__(self, mod, cls, i, *a, **kw):
-        mod.ID = i
-        self.stage = getattr(mod, cls)(*a, **kw)
-        self.name = f"{cls}{i}"
-        self.bus = self
-
-    @property
-    def rc(self):
-        return self.stage.rc
-
-    def start(self):
-        self.stage.setup_consumers()
-
-    def run(self):
-        self.stage.rc.run()
-
-    def stop(self):
-        self.stage.rc.stop()
-
-
-LEGACY = ("year_", "q1_", "q2_", "img_")
 
 
 class Cluster:
@@ -86,21 +55,13 @@ class Cluster:
         fp = self._imports()
         from common.bus import RabbitBus
         from common.topology import expected_result_eofs
-        import importlib
-
-        def load(module, input_queue=None, output_queue=None):
-            if input_queue:
-                os.environ["INPUT_QUEUE"] = input_queue
-            if output_queue:
-                os.environ["OUTPUT_QUEUE"] = output_queue
-            return importlib.import_module(module)
-        q1 = load("filters.q1_filter.query1", "q1_in")
-        q2 = load("filters.q2_filter.query2", "q2_in", "img_in")
-        yf = load("filters.year_filter.year_filter", "year_in")
-        ig = load("image.image_getter", "img_in")
+        from filters.q1_filter.query1 import Q1Filter
+        from filters.q2_filter.query2 import Q2Filter
         from filters.q5_filter.q5_filter import Q5Filter
         from gateway.broker import RabbitGatewayBroker
+        from filters.year_filter.year_filter import YearFilter
         from gateway.gateway import Gateway
+        from image.image_getter import ImageGetter
         from text_processing.abstract_cleaner.abstract_cleaner import AbstractCleaner
         from text_processing.avg_reducer.avg_reducer import AvgReducer
         from text_processing.length_mapper.length_mapper import LengthMapper
@@ -130,13 +91,13 @@ class Cluster:
         for i in range(AC):
             u[f"ac_{i}"] = dict(f=lambda i=i: AbstractCleaner(bus(), i, "norm_in", sd(f"ac_{i}")))
         for i in range(s["img"]):
-            u[f"img_{i}"] = dict(f=lambda i=i: Legacy(ig, "ImageGetter", i, wiki=StubWiki()))
+            u[f"img_{i}"] = dict(f=lambda i=i: ImageGetter(bus(), i, "img_in", sd(f"img_{i}"), wiki=StubWiki()))
         for i in range(s["q1"]):
-            u[f"q1_{i}"] = dict(f=lambda i=i: Legacy(q1, "Q1Filter", i))
+            u[f"q1_{i}"] = dict(f=lambda i=i: Q1Filter(bus(), i, "q1_in", sd(f"q1_{i}")))
         for i in range(s["q2"]):
-            u[f"q2_{i}"] = dict(f=lambda i=i: Legacy(q2, "Q2Filter", i))
+            u[f"q2_{i}"] = dict(f=lambda i=i: Q2Filter(bus(), i, "q2_in", "img_in", sd(f"q2_{i}")))
         for i in range(s["year"]):
-            u[f"year_{i}"] = dict(f=lambda i=i: Legacy(yf, "YearFilter", i))
+            u[f"year_{i}"] = dict(f=lambda i=i: YearFilter(bus(), i, "year_in", state_dir=sd(f"year_{i}")))
         for g in range(s["gw"]):
             self.gateways[f"gw_{g}"] = dict(gid=g + 1)
         fp.set_handler(self._on_failpoint)
@@ -232,7 +193,7 @@ class Cluster:
                     self.restarts[name] = self.restarts.get(name, 0) + 1
                     self.spawn_gateway(name)
             if self.chaos and self.rng.random() < self.chaos:
-                victims = [n for n in list(self.units) + list(self.gateways) if not n.startswith(LEGACY)]
+                victims = list(self.units) + list(self.gateways)
                 self.crash(self.rng.choice(victims))
 
     # ---------------------------------------------------------------- ejecución
@@ -303,16 +264,14 @@ class Cluster:
         return "; ".join(out)
 
     def check(self):
-        """Resultado correcto: mismas filas que las esperadas (como conjuntos) y, además, Q3, Q4 y Q5
-        con la MISMA CANTIDAD de filas (sin repetidas). Q1 y Q2 se comparan sólo como conjuntos: sus
-        etapas (YearFilter/Q1/Q2/ImageGetter) todavía no ponen msg_id y, si el Gateway reenvía un
-        batch tras caer, pueden repetir filas (limitación conocida, ver docs/FALLAS.md)."""
+        """Resultado correcto: mismas filas que las esperadas (como conjuntos) y la MISMA CANTIDAD de
+        filas en las cinco consultas (sin repetidas)."""
         from verify_output import compare, ok_report
         for c in range(self.s["clients"]):
             rep = compare(self.output / f"client_{c}", EXPECTED)
             if not ok_report(rep):
                 return False
-            if any(rep[q][0] != rep[q][1] for q in (3, 4, 5)):      # (obtenidas != esperadas)
+            if any(got != expected for got, expected, *_ in rep.values()):
                 return False
         return True
 

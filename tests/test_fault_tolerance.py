@@ -8,15 +8,14 @@ import pytest
 import scenarios as scn
 from ft_harness import Cluster, run_case
 
+pytestmark = pytest.mark.timeout(300)   
+
 SINGLE = scn.full(dict(clients=2))
 REPLICATED = scn.full(dict(clients=2, year=2, q1=2, q2=2, img=2, ac=2, lm=2, wm=2, P=2, A=2, K=2))
 
 GENERIC = ["before_persist:2", "after_persist:2", "after_publish:3", "before_ack:2",
            "after_ack:2", "after_eof_publish:1"]
-# Etapas ya migradas a la librería de FT. YearFilter, Q1, Q2 e ImageGetter (Victoria, tarea 18) todavía
-# no persisten estado: cuando las migre, sumar "year_0", "q1_0", "q2_0", "img_0" a esta lista.
-STAGES = ["ac_0", "lm_0", "wm_0", "wr_0", "avg_0", "top", "q5_0"]
-
+STAGES = ["year_0", "q1_0", "q2_0", "img_0", "ac_0", "lm_0", "wm_0", "wr_0", "avg_0", "top", "q5_0"]
 
 def fails(c):
     return f"terminó={c.finished} errores={c.errors} reinicios={c.restarts} {c.report()}"
@@ -29,7 +28,7 @@ def test_una_etapa_cae_en_un_punto_exacto_y_el_resultado_no_cambia(stage, failpo
     assert good, fails(c)
 
 
-@pytest.mark.parametrize("stage", ["ac_0", "lm_0", "wm_0", "wr_0", "q5_0"])
+@pytest.mark.parametrize("stage", ["year_0", "q1_0", "q2_0", "img_0", "ac_0", "lm_0", "wm_0", "wr_0", "q5_0"])
 def test_con_replicas_una_cae_y_vuelve_sin_alterar_el_resultado(stage):
     good, c = run_case(REPLICATED, "before_ack:2", target=(stage,))
     assert good, fails(c)

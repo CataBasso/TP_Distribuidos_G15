@@ -2,7 +2,6 @@ import logging
 import os
 import signal
 
-
 def env_int(name: str, default=None, alt: str = None) -> int:
     value = os.environ.get(name)
     if value is None and alt:
@@ -33,12 +32,17 @@ def state_dir(name: str):
 
 
 def run_stage(stage, level: str = None) -> None:
-    logging.basicConfig(level=level or os.environ.get("LOG_LEVEL", "INFO"),
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=level or os.environ.get("LOG_LEVEL", "INFO"),format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    responder = None
+    if os.environ.get("NODE_NAME"):
+        from common.health import start_from_env
+        responder = start_from_env()
     signal.signal(signal.SIGTERM, lambda *_: stage.stop())
     try:
         stage.run()
     except KeyboardInterrupt:
         stage.stop()
     finally:
+        if responder is not None:
+            responder.stop()
         stage.bus.close()

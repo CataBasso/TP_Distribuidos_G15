@@ -70,19 +70,16 @@ def test_un_solo_gateway_por_defecto_y_ids_de_los_fijos():
     assert scn.SCENARIOS[7][1]["gw"] >= 2 and scn.SCENARIOS[6][1]["gw"] >= 2
 
 
-def test_solo_las_etapas_con_estado_persistente_tienen_volumen_y_todas_se_reinician_solas():
+def test_todas_las_etapas_tienen_volumen_de_estado_y_se_reinician_solas():
     s = scn.full(dict(clients=1, gw=2, lm=2))
     text = scn.compose(s)
     services = text.split("\nvolumes:")[0]
     names = re.findall(r"^  (\w+):$", services, re.M)
     assert not [n for n in names if n.startswith("supervisor")]          # el Supervisor todavía no existe
-    for n in ("gateway_0", "length_mapper_1", "top_merger", "q5_filter_0", "abstract_cleaner_0"):
+    for n in [n for n in names if n != "rabbitmq" and not n.startswith("client_")]:
         blk = re.search(rf"^  {n}:\n(.*?)(?=^  \S|\Z)", text, re.S | re.M).group(1)
         assert f"{n}_state:/state" in blk
         assert re.search(rf"^  {n}_state:$", text, re.M)
-    for n in ("year_filter_0", "q1_filter_0", "q2_filter_0", "image_getter_0"):
-        blk = re.search(rf"^  {n}:\n(.*?)(?=^  \S|\Z)", text, re.S | re.M).group(1)
-        assert "/state" not in blk                                        # todavía no migradas (Victoria #18)
     for n in names:
         if n.startswith("client_"):
             continue

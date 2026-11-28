@@ -8,20 +8,19 @@ NAMES = ["rabbitmq", "client_0", "gateway_0", "gateway_1", "q5_filter_0", "q5_fi
          "length_mapper_0", "top_merger", "year_filter_0", "q1_filter_0"]
 
 
-def pick(scn, seed=0, all_=False):
-    return cm.pick_victims(scn, NAMES, random.Random(seed), all_)
+def pick(scn, seed=0):
+    return cm.pick_victims(scn, NAMES, random.Random(seed))
 
 
 def test_nunca_mata_a_rabbit_ni_a_los_clientes():
     for seed in range(50):
         for scn in ("random", "storm"):
-            assert not {"rabbitmq", "client_0"} & set(pick(scn, seed, True))
+            assert not {"rabbitmq", "client_0"} & set(pick(scn, seed))
 
 
-def test_por_defecto_no_toca_las_etapas_que_todavia_no_persisten():
-    for seed in range(50):
-        assert not any(n.startswith(cm.NOT_YET_FT) for n in pick("random", seed))
-    assert any(n.startswith("year_filter_") for s in range(50) for n in pick("random", s, True))
+def test_los_filtros_se_caen():
+    for prefix in ("year_filter_", "q1_filter_"):
+        assert any(pick("random", s)[0].startswith(prefix) for s in range(200))
 
 
 def test_stage_mata_a_todas_las_replicas_del_prefijo():

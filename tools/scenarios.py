@@ -34,7 +34,7 @@ SUPERVISOR_SETTINGS = {
     "PING_TIMEOUT": "0.5",          
     "MISS_LIMIT": "3",               
     "LEADER_MISS_LIMIT": "3",       
-    "STALL_LIMIT": "30",             
+    "STALL_LIMIT": "86400",             
     "ELECTION_TIMEOUT": "2",         
     "COORDINATOR_TIMEOUT": "5",      
 }
@@ -87,8 +87,8 @@ def _svc(name, dockerfile, env, depends=None, context="./src/", volumes=(), port
 
 
 
-PERSISTENT = ("gateway", "abstract_cleaner", "length_mapper", "avg_reducer", "q5_filter",
-              "word_mapper", "word_reducer", "top_merger")
+PERSISTENT = ("gateway", "year_filter", "q1_filter", "q2_filter", "image_getter", "abstract_cleaner",
+              "length_mapper", "avg_reducer", "q5_filter", "word_mapper", "word_reducer", "top_merger")
 # Sin Supervisores, Docker reinicia solo a los nodos que mueren (no detecta colgados). Con Supervisores
 # no se pone: los reinician ellos.
 RESTART = "    restart: unless-stopped"

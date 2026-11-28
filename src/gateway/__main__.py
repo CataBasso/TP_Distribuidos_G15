@@ -1,9 +1,11 @@
 import signal
 import sys
+import os
 
 from .broker import RabbitGatewayBroker
 from .config import GatewayConfig
 from .gateway import Gateway
+from common.health import start_from_env
 from common.logger import logger
 from common.runner import state_dir
 from common.topology import expected_result_eofs
@@ -18,7 +20,14 @@ def main() -> int:
     stop = lambda *_: gateway._stop.set()
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    gateway.serve_forever()
+    responder = None
+    if os.environ.get("NODE_NAME"):
+        responder = start_from_env()
+    try:
+        gateway.serve_forever()
+    finally:
+        if responder is not None:
+            responder.stop()
     return 0
 
 
